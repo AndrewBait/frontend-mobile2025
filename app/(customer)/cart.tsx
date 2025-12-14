@@ -1,24 +1,23 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import {
-    StyleSheet,
-    View,
-    Text,
-    FlatList,
-    TouchableOpacity,
-    Image,
-    ActivityIndicator,
-    RefreshControl,
-    Alert,
-} from 'react-native';
-import { router } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { router } from 'expo-router';
+import React, { useCallback, useState } from 'react';
+import {
+    ActivityIndicator,
+    FlatList,
+    Image,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
+} from 'react-native';
 import { GradientBackground } from '../../components/GradientBackground';
 import { ProfileRequiredModal } from '../../components/ProfileRequiredModal';
 import { Colors } from '../../constants/Colors';
-import { api, Cart, CartItem } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { api, Cart, CartItem } from '../../services/api';
 
 interface GroupedCart {
     storeId: string;
@@ -49,17 +48,34 @@ export default function CartScreen() {
                 setTimeout(() => {
                     console.log('Cart fetch timeout');
                     resolve({ items: [], total: 0 } as Cart);
-                }, 5000)
+                }, 10000) // Aumentado para 10s
             );
 
             const cart = await Promise.race([fetchCart, timeoutPromise]);
+
+            // Ensure cart has items array
+            if (!cart || !Array.isArray(cart.items)) {
+                console.log('Cart is empty or invalid, setting empty cart');
+                setGroupedCart([]);
+                return;
+            }
 
             // Group by store
             const grouped: Record<string, GroupedCart> = {};
 
             (cart.items || []).forEach((item) => {
-                const storeId = item.batch?.store_id || '';
-                const storeName = item.batch?.store?.name || 'Loja';
+                // Skip invalid items - check both batch and product_batches (backend format)
+                const batch = item.batch || item.product_batches;
+                if (!item || !batch) {
+                    console.warn('Skipping invalid cart item:', item);
+                    return;
+                }
+
+                // Handle both frontend format (batch) and backend format (product_batches)
+                const storeId = batch.store_id || '';
+                const store = batch.store || {};
+                const storeName = store.name || store.nome || 'Loja';
+                const promoPrice = batch.promo_price || batch.preco_promocional || 0;
 
                 if (!grouped[storeId]) {
                     grouped[storeId] = {
@@ -71,14 +87,20 @@ export default function CartScreen() {
                 }
 
                 grouped[storeId].items.push(item);
-                grouped[storeId].total += (item.batch?.promo_price || 0) * item.quantity;
+                grouped[storeId].total += promoPrice * item.quantity;
             });
 
             setGroupedCart(Object.values(grouped));
             console.log('Cart loaded:', Object.keys(grouped).length, 'stores');
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error loading cart:', error);
+            // Set empty cart on error instead of crashing
             setGroupedCart([]);
+            
+            // Log more details for debugging
+            if (error?.message) {
+                console.error('Cart error details:', error.message);
+            }
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -109,31 +131,78 @@ export default function CartScreen() {
         router.push(`/checkout/${storeId}`);
     };
 
-    const renderCartItem = (item: CartItem) => (
-        <View key={item.batch_id} style={styles.cartItem}>
-            <Image
-                source={{ uri: item.batch?.product?.photo1 || 'https://via.placeholder.com/100' }}
-                style={styles.itemImage}
-            />
-            <View style={styles.itemInfo}>
-                <Text style={styles.itemName} numberOfLines={2}>
-                    {item.batch?.product?.name || 'Produto'}
-                </Text>
-                <Text style={styles.itemPrice}>
-                    R$ {(item.batch?.promo_price || 0).toFixed(2)}
-                </Text>
+    const handleUpdateQuantity = async (batchId: string, newQuantity: number) => {
+        if (newQuantity < 1) {
+            // Se quantidade for 0, remove o item
+            await handleRemove(batchId);
+            return;
+        }
+
+        try {
+            // Remove o item atual e adiciona novamente com a nova quantidade
+            await api.removeFromCart(batchId);
+            await api.addToCart(batchId, newQuantity);
+            await loadCart();
+        } catch (error) {
+            console.error('Error updating quantity:', error);
+        }
+    };
+
+    const renderCartItem = (item: CartItem) => {
+        // Handle both frontend format (batch) and backend format (product_batches)
+        const batch = item.batch || (item as any).product_batches;
+        const product = batch?.product || batch?.products;
+        const productName = product?.name || product?.nome || 'Produto';
+        // Try multiple possible image field names
+        const productPhoto = product?.photo1 || product?.foto1 || product?.foto || product?.image || null;
+        const promoPrice = batch?.promo_price || batch?.preco_promocional || 0;
+        const batchId = item.batch_id || (item as any).product_batch_id || '';
+
+        return (
+            <View style={styles.cartItem}>
+                {productPhoto ? (
+                    <Image
+                        source={{ uri: productPhoto }}
+                        style={styles.itemImage}
+                        resizeMode="cover"
+                    />
+                ) : (
+                    <View style={[styles.itemImage, styles.imagePlaceholder]}>
+                        <Ionicons name="image-outline" size={32} color={Colors.textMuted} />
+                    </View>
+                )}
+                <View style={styles.itemInfo}>
+                    <Text style={styles.itemName} numberOfLines={2}>
+                        {productName}
+                    </Text>
+                    <Text style={styles.itemPrice}>
+                        R$ {promoPrice.toFixed(2).replace('.', ',')}
+                    </Text>
+                </View>
+                <View style={styles.quantityContainer}>
+                    <TouchableOpacity
+                        style={styles.quantityButton}
+                        onPress={() => handleUpdateQuantity(batchId, item.quantity - 1)}
+                    >
+                        <Ionicons name="remove" size={16} color={Colors.text} />
+                    </TouchableOpacity>
+                    <Text style={styles.quantityText}>{item.quantity}</Text>
+                    <TouchableOpacity
+                        style={styles.quantityButton}
+                        onPress={() => handleUpdateQuantity(batchId, item.quantity + 1)}
+                    >
+                        <Ionicons name="add" size={16} color={Colors.text} />
+                    </TouchableOpacity>
+                </View>
+                <TouchableOpacity
+                    style={styles.removeButton}
+                    onPress={() => handleRemove(batchId)}
+                >
+                    <Ionicons name="trash-outline" size={18} color={Colors.error} />
+                </TouchableOpacity>
             </View>
-            <View style={styles.quantityContainer}>
-                <Text style={styles.quantityText}>{item.quantity}x</Text>
-            </View>
-            <TouchableOpacity
-                style={styles.removeButton}
-                onPress={() => handleRemove(item.batch_id)}
-            >
-                <Ionicons name="trash-outline" size={18} color={Colors.error} />
-            </TouchableOpacity>
-        </View>
-    );
+        );
+    };
 
     const renderStoreGroup = ({ item }: { item: GroupedCart }) => (
         <View style={styles.storeGroup}>
@@ -145,7 +214,11 @@ export default function CartScreen() {
 
             {/* Items */}
             <View style={styles.itemsContainer}>
-                {item.items.map(renderCartItem)}
+                {item.items.map((cartItem) => (
+                    <React.Fragment key={cartItem.batch_id}>
+                        {renderCartItem(cartItem)}
+                    </React.Fragment>
+                ))}
             </View>
 
             {/* Subtotal and Checkout */}
@@ -331,12 +404,34 @@ const styles = StyleSheet.create({
         color: Colors.success,
     },
     quantityContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
         marginHorizontal: 12,
+        backgroundColor: Colors.glass,
+        borderRadius: 8,
+        paddingVertical: 4,
+        paddingHorizontal: 8,
+    },
+    quantityButton: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: Colors.primary,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     quantityText: {
         fontSize: 14,
         fontWeight: '600',
         color: Colors.text,
+        minWidth: 24,
+        textAlign: 'center',
+    },
+    imagePlaceholder: {
+        backgroundColor: Colors.glass,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     removeButton: {
         padding: 8,

@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
 import { router } from 'expo-router';
-import { supabase, getSession, signOut as supabaseSignOut, getCurrentUser } from '../services/supabase';
+import React, { createContext, ReactNode, useContext, useEffect, useRef, useState } from 'react';
 import { api, User } from '../services/api';
+import { getCurrentUser, getSession, supabase, signOut as supabaseSignOut } from '../services/supabase';
 
 interface AuthContextType {
     user: User | null;
@@ -40,19 +40,33 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         checkSession();
 
         // Listen for auth changes
+        // IMPORTANT: Don't use async directly in the callback to avoid deadlocks
+        // Use setTimeout to defer async operations
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            async (event, session) => {
+            (event, session) => {
+                console.log('[AuthContext] Auth state changed:', { event, hasSession: !!session });
+                
                 // Ignore auth changes during logout
                 if (isLoggingOutRef.current) {
+                    console.log('[AuthContext] Ignorando mudança de auth durante logout');
                     return;
                 }
 
+                // Update session synchronously
                 setSession(session);
-                if (session) {
-                    await fetchUserProfile();
-                } else {
-                    setUser(null);
-                }
+                
+                // Defer async operations to avoid deadlocks
+                setTimeout(() => {
+                    if (session) {
+                        console.log('[AuthContext] Sessão encontrada, buscando perfil...');
+                        fetchUserProfile().catch(error => {
+                            console.error('[AuthContext] Erro ao buscar perfil:', error);
+                        });
+                    } else {
+                        console.log('[AuthContext] Nenhuma sessão, limpando usuário');
+                        setUser(null);
+                    }
+                }, 0);
             }
         );
 
@@ -76,23 +90,39 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const fetchUserProfile = async () => {
         // Don't fetch if logging out
         if (isLoggingOutRef.current) {
+            console.log('[AuthContext] fetchUserProfile: Ignorando durante logout');
             return;
         }
 
+        console.log('[AuthContext] fetchUserProfile: Iniciando busca do perfil...');
         try {
             const profile = await api.getProfile();
+            console.log('[AuthContext] fetchUserProfile: Perfil obtido do backend:', { 
+                id: profile?.id, 
+                email: profile?.email,
+                role: profile?.role 
+            });
             setUser(profile);
-        } catch (error) {
-            console.error('Error fetching profile:', error);
+        } catch (error: any) {
+            console.error('[AuthContext] fetchUserProfile: Erro ao buscar perfil do backend:', error?.message);
             // If API fails, get basic info from Supabase
-            const supabaseUser = await getCurrentUser();
-            if (supabaseUser) {
-                setUser({
-                    id: supabaseUser.id,
-                    email: supabaseUser.email || '',
-                    name: supabaseUser.user_metadata?.name,
-                    photo_url: supabaseUser.user_metadata?.avatar_url,
-                });
+            try {
+                console.log('[AuthContext] fetchUserProfile: Tentando obter usuário do Supabase...');
+                const supabaseUser = await getCurrentUser();
+                if (supabaseUser) {
+                    console.log('[AuthContext] fetchUserProfile: Usuário obtido do Supabase:', { 
+                        id: supabaseUser.id, 
+                        email: supabaseUser.email 
+                    });
+                    setUser({
+                        id: supabaseUser.id,
+                        email: supabaseUser.email || '',
+                        name: supabaseUser.user_metadata?.name,
+                        photo_url: supabaseUser.user_metadata?.avatar_url,
+                    });
+                }
+            } catch (supabaseError: any) {
+                console.error('[AuthContext] fetchUserProfile: Erro ao obter usuário do Supabase:', supabaseError?.message);
             }
         }
     };
@@ -104,32 +134,68 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     const signOut = async () => {
         try {
+            console.log('[AuthContext] ========== INICIANDO LOGOUT ==========');
             // Set logging out flag immediately (before any async operations)
             isLoggingOutRef.current = true;
             setIsLoggingOut(true);
 
-            // Sign out from Supabase first
+            // Sign out from Supabase first (this will clear storage automatically)
+            console.log('[AuthContext] Fazendo signOut do Supabase...');
             await supabaseSignOut();
+            console.log('[AuthContext] SignOut do Supabase concluído');
 
             // Clear state after Supabase signOut
+            console.log('[AuthContext] Limpando estado local...');
             setUser(null);
             setSession(null);
 
-            console.log('Sign out completed successfully');
+            // Wait a tiny bit to ensure state is cleared
+            await new Promise(resolve => setTimeout(resolve, 100));
 
-            // Navigation will be handled by the layout components
-            // They will detect session is null and redirect
-        } catch (error) {
-            console.error('Error signing out:', error);
+            // Immediately redirect to login screen
+            console.log('🔴 [AuthContext] Redirecionando para tela de login (/)...');
+            console.log('🔴 [AuthContext] Estado atual após limpeza:', {
+                user: 'null',
+                session: 'null',
+                isLoggingOut
+            });
+            
+            // Use router.dismissAll() first to clear navigation stack, then navigate to login
+            console.log('🔴 [AuthContext] Limpando pilha de navegação...');
+            try {
+                router.dismissAll();
+                await new Promise(resolve => setTimeout(resolve, 50));
+            } catch (e) {
+                console.log('🔴 [AuthContext] dismissAll não disponível ou erro:', e);
+            }
+            
+            console.log('🔴 [AuthContext] Navegando para /...');
+            router.replace('/');
+            console.log('🔴 [AuthContext] router.replace("/") concluído');
+            
+            // Force a delay to ensure navigation completes and UI updates
+            await new Promise(resolve => setTimeout(resolve, 300));
+            
+            console.log('🔴 [AuthContext] ✅ Logout concluído - LoginScreen deve estar visível agora');
+        } catch (error: any) {
+            console.error('[AuthContext] Erro durante logout:', error);
             // Still clear state even if signOut fails
             setUser(null);
             setSession(null);
+            // Still redirect to login even on error
+            console.log('[AuthContext] Tentando redirecionar mesmo com erro...');
+            try {
+                router.replace('/');
+            } catch (navError) {
+                console.error('[AuthContext] Erro ao redirecionar:', navError);
+            }
         } finally {
-            // Reset flag after a delay to let layouts handle redirect
+            // Reset flag after a delay
             setTimeout(() => {
+                console.log('[AuthContext] Resetando flag de logout');
                 isLoggingOutRef.current = false;
                 setIsLoggingOut(false);
-            }, 2000);
+            }, 1500);
         }
     };
 

@@ -1,18 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import {
-    StyleSheet,
-    View,
-    Text,
-    ScrollView,
-    TouchableOpacity,
-    Image,
-    ActivityIndicator,
-    Share,
-    Alert,
-} from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    Image,
+    ScrollView,
+    Share,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 import { GradientBackground } from '../../components/GradientBackground';
 import { Colors } from '../../constants/Colors';
 import { api, Batch } from '../../services/api';
@@ -75,8 +75,14 @@ export default function ProductDetailScreen() {
 
     const handleShare = async () => {
         try {
+            // Handle both PT-BR and EN field names
+            const productData = (batch as any)?.products || batch?.product;
+            const productName = productData?.nome || productData?.name || 'Produto';
+            const promoPrice = batch?.promo_price ?? batch?.preco_promocional ?? 0;
+            const discountPercent = batch?.discount_percent ?? batch?.desconto_percentual ?? 0;
+            
             await Share.share({
-                message: `Confira: ${batch?.product?.name} por apenas R$ ${batch?.promo_price.toFixed(2)}! ${batch?.discount_percent}% de desconto!`,
+                message: `Confira: ${productName} por apenas R$ ${promoPrice.toFixed(2)}! ${discountPercent}% de desconto!`,
             });
         } catch (error) {
             console.error('Error sharing:', error);
@@ -93,9 +99,16 @@ export default function ProductDetailScreen() {
         );
     }
 
-    const daysToExpire = Math.ceil(
-        (new Date(batch.expiration_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-    );
+    // Handle both PT-BR and EN field names
+    const productData = (batch as any).products || batch.product;
+    const originalPrice = batch.original_price ?? batch.preco_normal_override ?? productData?.preco_normal ?? 0;
+    const promoPrice = batch.promo_price ?? batch.preco_promocional ?? 0;
+    const discountPercent = batch.discount_percent ?? batch.desconto_percentual ?? 0;
+    const expirationDate = batch.expiration_date || batch.data_vencimento || null;
+    
+    const daysToExpire = expirationDate ? Math.ceil(
+        (new Date(expirationDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+    ) : null;
 
     return (
         <GradientBackground>
@@ -132,12 +145,14 @@ export default function ProductDetailScreen() {
                     {/* Image */}
                     <View style={styles.imageContainer}>
                         <Image
-                            source={{ uri: batch.product?.photo1 || 'https://via.placeholder.com/300' }}
+                            source={{ uri: productData?.foto1 || productData?.photo1 || 'https://via.placeholder.com/300' }}
                             style={styles.productImage}
                         />
-                        <View style={styles.discountBadge}>
-                            <Text style={styles.discountText}>-{batch.discount_percent}%</Text>
-                        </View>
+                        {discountPercent > 0 && (
+                            <View style={styles.discountBadge}>
+                                <Text style={styles.discountText}>-{Math.round(discountPercent)}%</Text>
+                            </View>
+                        )}
                     </View>
 
                     {/* Info */}
@@ -147,56 +162,70 @@ export default function ProductDetailScreen() {
                             <View style={styles.storeIconContainer}>
                                 <Ionicons name="storefront" size={18} color={Colors.secondary} />
                             </View>
-                            <Text style={styles.storeName}>{batch.store?.name || 'Loja'}</Text>
+                            <Text style={styles.storeName}>{batch.store?.name || (batch.store as any)?.nome || 'Loja'}</Text>
                             <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
                         </TouchableOpacity>
 
                         {/* Product Name */}
-                        <Text style={styles.productName}>{batch.product?.name}</Text>
+                        <Text style={styles.productName}>{productData?.nome || productData?.name}</Text>
 
                         {/* Category */}
-                        <View style={styles.categoryChip}>
-                            <Text style={styles.categoryText}>{batch.product?.category}</Text>
-                        </View>
+                        {(productData?.categoria || productData?.category) && (
+                            <View style={styles.categoryChip}>
+                                <Text style={styles.categoryText}>{productData?.categoria || productData?.category}</Text>
+                            </View>
+                        )}
 
                         {/* Description */}
-                        {batch.product?.description && (
-                            <Text style={styles.description}>{batch.product.description}</Text>
+                        {(productData?.descricao || productData?.description) && (
+                            <Text style={styles.description}>{productData?.descricao || productData?.description}</Text>
                         )}
 
                         {/* Prices */}
                         <View style={styles.priceContainer}>
                             <View>
-                                <Text style={styles.originalPrice}>
-                                    R$ {batch.original_price.toFixed(2)}
-                                </Text>
+                                {originalPrice > promoPrice && (
+                                    <Text style={styles.originalPrice}>
+                                        R$ {originalPrice.toFixed(2).replace('.', ',')}
+                                    </Text>
+                                )}
                                 <Text style={styles.promoPrice}>
-                                    R$ {batch.promo_price.toFixed(2)}
+                                    R$ {promoPrice.toFixed(2).replace('.', ',')}
                                 </Text>
                             </View>
-                            <View style={styles.savingsBox}>
-                                <Text style={styles.savingsText}>
-                                    Economia de R$ {(batch.original_price - batch.promo_price).toFixed(2)}
-                                </Text>
-                            </View>
+                            {originalPrice > promoPrice && (
+                                <View style={styles.savingsBox}>
+                                    <Text style={styles.savingsText}>
+                                        Economia de R$ {(originalPrice - promoPrice).toFixed(2).replace('.', ',')}
+                                    </Text>
+                                </View>
+                            )}
                         </View>
 
                         {/* Expiration & Stock */}
                         <View style={styles.infoCards}>
-                            <View style={[styles.infoCard, { backgroundColor: Colors.warning + '15' }]}>
-                                <Ionicons name="calendar" size={20} color={Colors.warning} />
-                                <Text style={[styles.infoCardTitle, { color: Colors.warning }]}>
-                                    {daysToExpire > 0 ? `Vence em ${daysToExpire} dia(s)` : 'Vence hoje!'}
-                                </Text>
-                                <Text style={styles.infoCardText}>
-                                    {new Date(batch.expiration_date).toLocaleDateString('pt-BR')}
-                                </Text>
-                            </View>
+                            {expirationDate && (
+                                <View style={[styles.infoCard, { backgroundColor: Colors.warning + '15' }]}>
+                                    <Ionicons name="calendar" size={20} color={Colors.warning} />
+                                    <Text style={[styles.infoCardTitle, { color: Colors.warning }]}>
+                                        {daysToExpire !== null && daysToExpire > 0 
+                                            ? `Vence em ${daysToExpire} dia(s)` 
+                                            : daysToExpire === 0 
+                                                ? 'Vence hoje!' 
+                                                : daysToExpire !== null && daysToExpire < 0
+                                                    ? 'Vencido'
+                                                    : 'Data inválida'}
+                                    </Text>
+                                    <Text style={styles.infoCardText}>
+                                        {new Date(expirationDate).toLocaleDateString('pt-BR')}
+                                    </Text>
+                                </View>
+                            )}
 
                             <View style={[styles.infoCard, { backgroundColor: Colors.success + '15' }]}>
                                 <Ionicons name="cube" size={20} color={Colors.success} />
                                 <Text style={[styles.infoCardTitle, { color: Colors.success }]}>
-                                    {batch.stock} em estoque
+                                    {(batch.stock ?? batch.estoque_total ?? 0)} em estoque
                                 </Text>
                                 <Text style={styles.infoCardText}>Unidades disponíveis</Text>
                             </View>
@@ -233,7 +262,7 @@ export default function ProductDetailScreen() {
                         <Text style={styles.quantityText}>{quantity}</Text>
                         <TouchableOpacity
                             style={styles.quantityButton}
-                            onPress={() => setQuantity(Math.min(batch.stock, quantity + 1))}
+                            onPress={() => setQuantity(Math.min(batch.stock ?? batch.estoque_total ?? 99, quantity + 1))}
                         >
                             <Ionicons name="add" size={20} color={Colors.text} />
                         </TouchableOpacity>
@@ -242,7 +271,7 @@ export default function ProductDetailScreen() {
                     <TouchableOpacity
                         style={styles.addButton}
                         onPress={handleAddToCart}
-                        disabled={batch.stock === 0}
+                        disabled={(batch.stock ?? batch.estoque_total ?? 0) === 0}
                     >
                         <LinearGradient
                             colors={[Colors.primary, Colors.primaryDark]}
@@ -250,7 +279,7 @@ export default function ProductDetailScreen() {
                         >
                             <Ionicons name="cart" size={20} color={Colors.text} />
                             <Text style={styles.addButtonText}>
-                                Adicionar • R$ {(batch.promo_price * quantity).toFixed(2)}
+                                Adicionar • R$ {(promoPrice * quantity).toFixed(2).replace('.', ',')}
                             </Text>
                         </LinearGradient>
                     </TouchableOpacity>

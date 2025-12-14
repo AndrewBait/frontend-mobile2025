@@ -102,6 +102,39 @@ export const formatPhone = (value: string): string => {
         .replace(/(\d{5})(\d)/, '$1-$2');
 };
 
+// Format phone to backend format: +55 11 99999-9999
+export const formatPhoneForBackend = (phone: string): string => {
+    // Remove all non-digit characters
+    const cleaned = phone.replace(/\D/g, '');
+    
+    // If phone already starts with 55, remove it (will add +55)
+    const withoutCountry = cleaned.startsWith('55') ? cleaned.slice(2) : cleaned;
+    
+    // Must have at least 10 digits (DDD + 8 digits) or 11 digits (DDD + 9 digits)
+    if (withoutCountry.length < 10 || withoutCountry.length > 11) {
+        return phone; // Return as is if invalid, backend will validate
+    }
+    
+    // Extract DDD (first 2 digits) and number (rest)
+    const ddd = withoutCountry.slice(0, 2);
+    const number = withoutCountry.slice(2);
+    
+    // Format number: if 9 digits (celular), format as 99999-9999, else 9999-9999
+    let formattedNumber: string;
+    if (number.length === 9) {
+        // Celular: 99999-9999
+        formattedNumber = number.replace(/(\d{5})(\d{4})/, '$1-$2');
+    } else if (number.length === 8) {
+        // Fixo: 9999-9999
+        formattedNumber = number.replace(/(\d{4})(\d{4})/, '$1-$2');
+    } else {
+        return phone; // Invalid length, return as is
+    }
+    
+    // Return in format: +55 DDD NÚMERO
+    return `+55 ${ddd} ${formattedNumber}`;
+};
+
 // Sanitize text (remove special chars except allowed)
 export const sanitizeText = (text: string, allowNumbers = true): string => {
     if (allowNumbers) {

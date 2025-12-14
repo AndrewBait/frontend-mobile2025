@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '../constants/config';
+import { formatPhoneForBackend } from '../utils/validation';
 import { getAccessToken } from './supabase';
 
 // Types based on API contract
@@ -138,13 +139,57 @@ class ApiClient {
             throw new Error(error.message || `API Error: ${response.status}`);
         }
 
-        return response.json();
+        // Check if response has content before parsing JSON
+        const contentType = response.headers.get('content-type');
+        const text = await response.text();
+        
+        // If response is empty, return empty object/array based on endpoint
+        if (!text || text.trim() === '') {
+            // For cart endpoint, return empty cart structure
+            if (endpoint.includes('/cart')) {
+                return { items: [], total: 0 } as T;
+            }
+            // For other endpoints, return empty object
+            return {} as T;
+        }
+
+        // Try to parse JSON, but handle parse errors gracefully
+        try {
+            return JSON.parse(text) as T;
+        } catch (parseError) {
+            console.error(`[API] JSON parse error for ${endpoint}:`, parseError);
+            console.error(`[API] Response text:`, text.substring(0, 200));
+            
+            // For cart endpoint, return empty cart on parse error
+            if (endpoint.includes('/cart')) {
+                return { items: [], total: 0 } as T;
+            }
+            
+            // Re-throw with more context
+            throw new Error(`Failed to parse response from ${endpoint}: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+        }
     }
 
     // ==================== USER ====================
 
     async getMe(): Promise<User> {
-        return this.request('/me');
+        const response = await this.request<any>('/me');
+        
+        // Map backend fields (Portuguese) to frontend fields (English)
+        // Similar to getProfile() but for /me endpoint
+        return {
+            id: response.id,
+            email: response.email,
+            name: response.nome || response.name,
+            phone: response.telefone || response.phone,
+            photo_url: response.foto_url || response.photo_url,
+            role: response.role,
+            lat: response.lat,
+            lng: response.lng,
+            radius_km: response.raio_padrao_km || response.radius_km || 5,
+            profile_complete: response.profile_complete,
+            created_at: response.created_at,
+        };
     }
 
     async getProfile(): Promise<User> {
@@ -170,9 +215,20 @@ class ApiClient {
     }
 
     async updateProfile(data: Partial<User>): Promise<User> {
+        // Map frontend fields (English) to backend fields (Portuguese)
+        const backendData: any = {};
+        
+        if (data.role !== undefined) backendData.role = data.role;
+        if (data.phone !== undefined) {
+            // Format phone to backend format: +55 11 99999-9999
+            backendData.telefone = formatPhoneForBackend(data.phone);
+        }
+        if (data.name !== undefined) backendData.nome = data.name; // Map name -> nome
+        if (data.photo_url !== undefined) backendData.foto_url = data.photo_url;
+        
         return this.request('/me/profile', {
             method: 'PUT',
-            body: JSON.stringify(data),
+            body: JSON.stringify(backendData),
         });
     }
 
@@ -310,7 +366,42 @@ class ApiClient {
     // ==================== CART ====================
 
     async getCart(): Promise<Cart> {
-        return this.request('/me/cart');
+        const response = await this.request<any>('/me/cart');
+        
+        // Map backend fields (Portuguese/plural) to frontend fields (English/singular)
+        // Backend returns: product_batches, products
+        // Frontend expects: batch, batch.product
+        const mappedItems = (response.items || []).map((item: any) => {
+            // Backend structure: item.product_batches, item.product_batches.products
+            // Frontend structure: item.batch, item.batch.product
+            const productBatches = item.product_batches || item.batch;
+            const products = productBatches?.products || productBatches?.product;
+            
+            return {
+                ...item,
+                batch_id: item.product_batch_id || item.batch_id,
+                quantity: item.quantity,
+                batch: productBatches ? {
+                    ...productBatches,
+                    id: productBatches.id,
+                    promo_price: productBatches.preco_promocional || productBatches.promo_price,
+                    original_price: productBatches.preco_normal_override || productBatches.original_price,
+                    expiration_date: productBatches.data_vencimento || productBatches.expiration_date,
+                    store_id: productBatches.store_id,
+                    product: products ? {
+                        ...products,
+                        name: products.nome || products.name,
+                        photo1: products.foto1 || products.photo1 || products.foto || products.image,
+                    } : productBatches.product,
+                    store: productBatches.store,
+                } : item.batch,
+            };
+        });
+        
+        return {
+            items: mappedItems,
+            total: response.total || 0,
+        };
     }
 
     async addToCart(batchId: string, quantity: number = 1): Promise<Cart> {

@@ -1,17 +1,17 @@
-import React, { useState, useCallback } from 'react';
-import {
-    StyleSheet,
-    View,
-    Text,
-    FlatList,
-    TouchableOpacity,
-    Image,
-    ActivityIndicator,
-    RefreshControl,
-} from 'react-native';
-import { router } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+import { router } from 'expo-router';
+import React, { useCallback, useState } from 'react';
+import {
+    ActivityIndicator,
+    FlatList,
+    Image,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 import { GradientBackground } from '../../components/GradientBackground';
 import { Colors } from '../../constants/Colors';
 import { api, Batch } from '../../services/api';
@@ -73,50 +73,84 @@ export default function FavoritesScreen() {
         }
     };
 
-    const renderFavorite = ({ item }: { item: Batch }) => (
-        <TouchableOpacity
-            style={styles.productCard}
-            onPress={() => router.push(`/product/${item.id}`)}
-            activeOpacity={0.9}
-        >
-            <Image
-                source={{ uri: item.product?.photo1 || 'https://via.placeholder.com/100' }}
-                style={styles.productImage}
-            />
+    const renderFavorite = ({ item }: { item: Batch }) => {
+        // Handle both frontend format and backend format (Portuguese/plural)
+        const productData = (item as any).products || item.product;
+        const productName = productData?.nome || productData?.name || 'Produto';
+        const productPhoto = productData?.foto1 || productData?.photo1 || null;
+        const storeName = item.store?.name || (item.store as any)?.nome || 'Loja';
+        
+        // Handle price fields (Portuguese/English)
+        const originalPrice = item.original_price ?? item.preco_normal_override ?? productData?.preco_normal ?? 0;
+        const promoPrice = item.promo_price ?? item.preco_promocional ?? 0;
+        const discountPercent = item.discount_percent ?? item.desconto_percentual ?? 0;
 
-            <View style={styles.productInfo}>
-                <Text style={styles.storeName}>{item.store?.name || 'Loja'}</Text>
-                <Text style={styles.productName} numberOfLines={2}>
-                    {item.product?.name || 'Produto'}
-                </Text>
+        return (
+            <TouchableOpacity
+                style={styles.productCard}
+                onPress={() => router.push(`/product/${item.id}`)}
+                activeOpacity={0.9}
+            >
+                {productPhoto ? (
+                    <Image
+                        source={{ uri: productPhoto }}
+                        style={styles.productImage}
+                        resizeMode="cover"
+                    />
+                ) : (
+                    <View style={[styles.productImage, styles.imagePlaceholder]}>
+                        <Ionicons name="image-outline" size={32} color={Colors.textMuted} />
+                    </View>
+                )}
 
-                <View style={styles.priceRow}>
-                    <Text style={styles.originalPrice}>R$ {item.original_price.toFixed(2)}</Text>
-                    <Text style={styles.promoPrice}>R$ {item.promo_price.toFixed(2)}</Text>
-                    <View style={styles.discountBadge}>
-                        <Text style={styles.discountText}>-{item.discount_percent}%</Text>
+                <View style={styles.productInfo}>
+                    <Text style={styles.storeName}>{storeName}</Text>
+                    <Text style={styles.productName} numberOfLines={2}>
+                        {productName}
+                    </Text>
+
+                    <View style={styles.priceRow}>
+                        {originalPrice > promoPrice && (
+                            <Text style={styles.originalPrice}>
+                                R$ {originalPrice.toFixed(2).replace('.', ',')}
+                            </Text>
+                        )}
+                        <Text style={styles.promoPrice}>
+                            R$ {promoPrice.toFixed(2).replace('.', ',')}
+                        </Text>
+                        {discountPercent > 0 && (
+                            <View style={styles.discountBadge}>
+                                <Text style={styles.discountText}>-{Math.round(discountPercent)}%</Text>
+                            </View>
+                        )}
+                    </View>
+
+                    <View style={styles.actionsRow}>
+                        <TouchableOpacity
+                            style={styles.addButton}
+                            onPress={(e) => {
+                                e.stopPropagation();
+                                handleAddToCart(item);
+                            }}
+                        >
+                            <Ionicons name="cart" size={16} color={Colors.text} />
+                            <Text style={styles.addButtonText}>Adicionar</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={styles.removeButton}
+                            onPress={(e) => {
+                                e.stopPropagation();
+                                handleRemoveFavorite(item.id);
+                            }}
+                        >
+                            <Ionicons name="heart-dislike" size={18} color={Colors.error} />
+                        </TouchableOpacity>
                     </View>
                 </View>
-
-                <View style={styles.actionsRow}>
-                    <TouchableOpacity
-                        style={styles.addButton}
-                        onPress={() => handleAddToCart(item)}
-                    >
-                        <Ionicons name="cart" size={16} color={Colors.text} />
-                        <Text style={styles.addButtonText}>Adicionar</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={styles.removeButton}
-                        onPress={() => handleRemoveFavorite(item.id)}
-                    >
-                        <Ionicons name="heart-dislike" size={18} color={Colors.error} />
-                    </TouchableOpacity>
-                </View>
-            </View>
-        </TouchableOpacity>
-    );
+            </TouchableOpacity>
+        );
+    };
 
     if (loading) {
         return (
@@ -215,6 +249,10 @@ const styles = StyleSheet.create({
         width: 100,
         height: 120,
         backgroundColor: Colors.glass,
+    },
+    imagePlaceholder: {
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     productInfo: {
         flex: 1,

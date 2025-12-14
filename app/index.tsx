@@ -1,58 +1,233 @@
-import React, { useEffect, useState } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Dimensions, Image, ActivityIndicator, Alert } from 'react-native';
-import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
+import { router } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Dimensions, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { GradientBackground } from '../components/GradientBackground';
 import { Colors } from '../constants/Colors';
-import { supabase, getSession } from '../services/supabase';
+import { useAuth } from '../contexts/AuthContext';
 import { api } from '../services/api';
+import { getSession, supabase } from '../services/supabase';
+import { getGlobalRedirectInProgress, setGlobalRedirectInProgress } from '../utils/redirectLock';
 
 const { height } = Dimensions.get('window');
 
 export default function LoginScreen() {
     const [loading, setLoading] = useState(false);
     const [checking, setChecking] = useState(true);
+    const isProcessingLoginRef = React.useRef(false);
+    const { session } = useAuth();
+
+    // Monitor auth context changes - this ensures LoginScreen responds to logout
+    useEffect(() => {
+        console.log('🔵 [LoginScreen] Auth context session changed:', !!session);
+        
+        // If we're on login screen and there's no session, ensure we show the login UI
+        if (!session) {
+            console.log('🔵 [LoginScreen] ✅ No session in context - ensuring login screen is shown');
+            if (checking) {
+                console.log('🔵 [LoginScreen] Stopping check, showing login UI');
+                setChecking(false);
+            }
+        } else if (session && !isProcessingLoginRef.current && !loading) {
+            // Only redirect if we're not currently processing a login and not loading
+            // This prevents race conditions with AuthCallback
+            console.log('🔵 [LoginScreen] Session detected in context, but waiting for login process to complete...');
+            // Don't auto-redirect here - let the login process handle it
+        }
+    }, [session]);
 
     useEffect(() => {
+        console.log('🔵 [LoginScreen] Component mounted - checking session...');
         checkExistingSession();
     }, []);
 
+    // Log every render
+    console.log('🔵 [LoginScreen] RENDER - checking:', checking, 'loading:', loading, 'hasSession:', !!session);
+
     const checkExistingSession = async () => {
         try {
-            const session = await getSession();
-            if (session) {
-                await redirectToApp();
+            console.log('🔵 [LoginScreen] Verificando sessão existente...');
+            const currentSession = await getSession();
+            console.log('🔵 [LoginScreen] Sessão encontrada:', !!currentSession);
+            
+            // Only redirect if we have a session and we're not currently processing a login
+            // This prevents race conditions where both checkExistingSession and the login flow
+            // try to redirect at the same time
+            if (currentSession && !isProcessingLoginRef.current && !loading) {
+                console.log('🔵 [LoginScreen] Sessão válida encontrada, mas aguardando processo de login...');
+                // Don't redirect here - let the login process handle it to avoid race conditions
+                setChecking(false);
+            } else if (isProcessingLoginRef.current || loading) {
+                console.log('🔵 [LoginScreen] Login em processamento, ignorando verificação de sessão');
+            } else {
+                console.log('🔵 [LoginScreen] ✅ Nenhuma sessão - LoginScreen deve ser exibido');
+                setChecking(false);
             }
         } catch (error) {
-            console.error('Error checking session:', error);
-        } finally {
+            console.error('🔵 [LoginScreen] Erro ao verificar sessão:', error);
             setChecking(false);
+        } finally {
+            // Only set checking to false if we didn't redirect
+            if (!checking) {
+                console.log('🔵 [LoginScreen] Verificação de sessão concluída, checking = false');
+            }
         }
     };
 
     const redirectToApp = async () => {
+        // Prevent multiple simultaneous calls (check both local and global flags)
+        const globalLock = getGlobalRedirectInProgress();
+        if (isProcessingLoginRef.current || globalLock) {
+            console.log('[LoginScreen] redirectToApp já em execução (local:', isProcessingLoginRef.current, 'global:', globalLock, '), ignorando...');
+            console.log('[LoginScreen] Aguardando que outro processo complete o redirect...');
+            // Don't return immediately - wait a bit to see if the other process completes
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            // Check again if we're still processing (another redirect may have happened)
+            if (getGlobalRedirectInProgress()) {
+                console.log('[LoginScreen] Outro processo ainda está em execução, retornando...');
+                return;
+            }
+            // If the other process completed, try again
+            console.log('[LoginScreen] Outro processo concluído, tentando novamente...');
+        }
+
         try {
-            console.log('Checking user role from backend...');
+            isProcessingLoginRef.current = true;
+            setGlobalRedirectInProgress(true);
+            console.log('[LoginScreen] ========== REDIRECIONANDO PARA APP ==========');
+            console.log('[LoginScreen] Verificando role do usuário no backend...');
+            
+            const startTime = Date.now();
             const user = await api.getMe();
-            console.log('User role:', user?.role);
+            const duration = Date.now() - startTime;
+            
+            console.log('[LoginScreen] Usuário recebido em', duration, 'ms');
+            console.log('[LoginScreen] Dados do usuário:', { 
+                id: user?.id, 
+                email: user?.email, 
+                role: user?.role,
+                name: user?.name,
+                phone: user?.phone ? 'informado' : 'não informado'
+            });
+
+            // Validate user object
+            if (!user || !user.id) {
+                console.error('[LoginScreen] ⚠️ Usuário inválido ou não encontrado');
+                console.log('[LoginScreen] Redirecionando para seleção de role (usuário inválido)');
+                router.replace('/select-role');
+                return;
+            }
 
             const role = user?.role;
+            const phoneValue = user?.phone;
+            const hasPhone = phoneValue && typeof phoneValue === 'string' && phoneValue.length >= 10;
+            const isProfileComplete = user?.profile_complete === true;
 
-            if (role === 'customer') {
-                console.log('Redirecting to customer dashboard');
-                router.replace('/(customer)');
+            console.log('[LoginScreen] Análise detalhada:', {
+                role,
+                roleType: typeof role,
+                phoneValue: phoneValue || '(vazio/null/undefined)',
+                phoneType: typeof phoneValue,
+                phoneLength: phoneValue ? phoneValue.length : 0,
+                hasPhone,
+                isProfileComplete,
+                roleIsNull: role === null,
+                roleIsUndefined: role === undefined,
+                roleIsEmpty: role === '',
+                roleIsFalsy: !role,
+                userKeys: Object.keys(user || {}),
+                fullUserObject: JSON.stringify(user, null, 2)
+            });
+
+            // Check if role is empty/null/undefined - user needs to select role
+            // IMPORTANTE: Só redireciona para /select-role se REALMENTE não tiver role
+            // Se o usuário já tem role cadastrado, não deve ir para seleção de role
+            const roleIsEmpty = !role || role === null || role === undefined || role === '' || role === 'undefined';
+            if (roleIsEmpty) {
+                console.log('[LoginScreen] ⚠️ NENHUM ROLE - Redirecionando para seleção de role');
+                isProcessingLoginRef.current = false;
+                setGlobalRedirectInProgress(false);
+                router.replace('/select-role');
+                return;
+            } else if (role === 'customer') {
+                // IMPORTANTE: Se o backend atribuiu role "customer" automaticamente (usuário novo sem dados),
+                // detectamos isso e redirecionamos para seleção de role para que o usuário possa escolher
+                // Verificamos se NÃO tem telefone E NÃO tem profile_complete E parece ser um usuário recém-criado
+                const seemsLikeAutoAssigned = !hasPhone && !isProfileComplete && !user?.name;
+                
+                if (seemsLikeAutoAssigned) {
+                    console.log('[LoginScreen] ⚠️ Role "customer" parece ter sido atribuído automaticamente pelo backend');
+                    console.log('[LoginScreen] Usuário novo sem dados - Redirecionando para seleção de role');
+                    isProcessingLoginRef.current = false;
+                    setGlobalRedirectInProgress(false);
+                    router.replace('/select-role');
+                    return;
+                } else if (isProfileComplete || hasPhone) {
+                    // Se o usuário TEM role "customer" E tem perfil completo → vai direto para dashboard
+                    console.log('[LoginScreen] ✅ Consumidor com cadastro completo - Redirecionando para dashboard (ofertas)');
+                    console.log('[LoginScreen] Motivo: profile_complete=' + isProfileComplete + ', hasPhone=' + hasPhone);
+                    isProcessingLoginRef.current = false;
+                    setGlobalRedirectInProgress(false);
+                    router.replace('/(customer)');
+                    return;
+                } else {
+                    // Tem role mas não tem dados completos (ex: cadastro parcial)
+                    console.log('[LoginScreen] ⚠️ Consumidor com role mas sem dados completos - Redirecionando para setup');
+                    console.log('[LoginScreen] Faltando: profile_complete=' + isProfileComplete + ', phone=' + (phoneValue || '(vazio)'));
+                    isProcessingLoginRef.current = false;
+                    setGlobalRedirectInProgress(false);
+                    router.replace('/(customer)/setup');
+                    return;
+                }
             } else if (role === 'store_owner' || role === 'merchant') {
-                console.log('Redirecting to merchant dashboard');
+                // Para lojista, se tem role já vai direto (assumindo que lojista já tem cadastro se tem role)
+                console.log('[LoginScreen] ✅ Lojista - Redirecionando para dashboard');
+                // Reset flags before redirecting to ensure navigation works
+                isProcessingLoginRef.current = false;
+                setGlobalRedirectInProgress(false);
                 router.replace('/(merchant)');
+                return; // Return early after redirect
             } else {
-                console.log('No role found, going to select-role');
+                console.log('[LoginScreen] ⚠️ Role desconhecido:', role);
+                isProcessingLoginRef.current = false;
+                setGlobalRedirectInProgress(false);
+                router.replace('/select-role');
+                return;
+            }
+        } catch (error: any) {
+            console.error('[LoginScreen] ========== ERRO AO REDIRECIONAR ==========');
+            console.error('[LoginScreen] Tipo:', error?.constructor?.name);
+            console.error('[LoginScreen] Mensagem:', error?.message);
+            console.error('[LoginScreen] Stack:', error?.stack);
+            
+            // Check if it's a 500 error which usually means user doesn't exist in backend
+            const isInternalServerError = error?.message?.includes('Internal server error') || 
+                                         error?.message?.includes('API Error: 500');
+            const isTimeout = error?.message?.includes('Timeout') || error?.message?.includes('Failed to fetch');
+            
+            if (isTimeout) {
+                console.error('[LoginScreen] ⚠️ Backend não está respondendo!');
+                console.error('[LoginScreen] Verifique se está rodando em: http://192.168.10.9:3000');
+                console.log('[LoginScreen] Redirecionando para seleção de role devido ao timeout');
+                router.replace('/select-role');
+            } else if (isInternalServerError) {
+                // 500 error usually means user doesn't exist in backend (no role yet)
+                console.log('[LoginScreen] ⚠️ Usuário não existe no backend (provavelmente sem role)');
+                console.log('[LoginScreen] Redirecionando para seleção de role');
+                router.replace('/select-role');
+            } else {
+                // Other errors - redirect to role selection
+                console.log('[LoginScreen] Redirecionando para seleção de role devido ao erro');
                 router.replace('/select-role');
             }
-        } catch (error) {
-            console.error('Error getting user, going to select-role:', error);
-            router.replace('/select-role');
+            // Reset flags in error cases too
+            isProcessingLoginRef.current = false;
+            setGlobalRedirectInProgress(false);
+        } finally {
+            isProcessingLoginRef.current = false;
+            setGlobalRedirectInProgress(false);
         }
     };
 
@@ -91,30 +266,108 @@ export default function LoginScreen() {
                         const accessToken = params.get('access_token');
                         const refreshToken = params.get('refresh_token');
 
-                        console.log('Tokens found:', !!accessToken, !!refreshToken);
+                        console.log('[LoginScreen] Tokens encontrados:', { 
+                            accessToken: !!accessToken, 
+                            refreshToken: !!refreshToken 
+                        });
 
                         if (accessToken && refreshToken) {
-                            console.log('Setting session...');
+                            // Prevent multiple simultaneous logins
+                            if (isProcessingLoginRef.current) {
+                                console.log('[LoginScreen] Login já em processamento, ignorando...');
+                                return;
+                            }
+                            
+                            isProcessingLoginRef.current = true;
+                            console.log('[LoginScreen] ========== TOKENS ENCONTRADOS ==========');
+                            console.log('[LoginScreen] Processando tokens diretamente...');
 
                             try {
                                 // Set session first
-                                const { error: sessionError } = await supabase.auth.setSession({
+                                console.log('[LoginScreen] Chamando supabase.auth.setSession()...');
+                                console.log('[LoginScreen] Tokens preparados - accessToken length:', accessToken.length, 'refreshToken length:', refreshToken.length);
+                                
+                                // Call setSession directly - it should respond quickly
+                                console.log('[LoginScreen] Iniciando setSession (sem timeout)...');
+                                const setSessionStartTime = Date.now();
+                                
+                                const setSessionResult = await supabase.auth.setSession({
                                     access_token: accessToken,
                                     refresh_token: refreshToken,
                                 });
-
+                                
+                                const setSessionDuration = Date.now() - setSessionStartTime;
+                                console.log('[LoginScreen] setSession completou em', setSessionDuration, 'ms');
+                                console.log('[LoginScreen] setSession retornou:', {
+                                    hasData: !!setSessionResult?.data,
+                                    hasError: !!setSessionResult?.error,
+                                    hasSession: !!setSessionResult?.data?.session,
+                                    errorMessage: setSessionResult?.error?.message
+                                });
+                                
+                                const { data: sessionData, error: sessionError } = setSessionResult;
+                                
                                 if (sessionError) {
-                                    console.error('Session error:', sessionError);
+                                    console.error('[LoginScreen] ERRO ao configurar sessão:', sessionError);
+                                    Alert.alert('Erro', `Não foi possível configurar a sessão: ${sessionError.message}`);
+                                    isProcessingLoginRef.current = false;
+                                    setLoading(false);
+                                    return;
                                 }
-
-                                console.log('Session set, checking user role...');
-
+                                
+                                if (!sessionData?.session) {
+                                    console.error('[LoginScreen] Sessão não foi criada!');
+                                    Alert.alert('Erro', 'Sessão não configurada. Tente novamente.');
+                                    isProcessingLoginRef.current = false;
+                                    setLoading(false);
+                                    return;
+                                }
+                                
+                                console.log('[LoginScreen] ✅ Sessão configurada com sucesso:', {
+                                    hasSession: !!sessionData.session,
+                                    userId: sessionData.session?.user?.id
+                                });
+                                
+                                // Small delay to ensure session is persisted
+                                console.log('[LoginScreen] Aguardando 500ms para sessão persistir...');
+                                await new Promise(resolve => setTimeout(resolve, 500));
+                                
+                                // Verify session was persisted
+                                console.log('[LoginScreen] Verificando sessão persistida...');
+                                const { data: { session: verifySession }, error: verifyError } = await supabase.auth.getSession();
+                                
+                                if (verifyError) {
+                                    console.error('[LoginScreen] ⚠️ Erro ao verificar sessão:', verifyError);
+                                    // Continue anyway if session was set successfully
+                                }
+                                
+                                console.log('[LoginScreen] Verificação de sessão:', {
+                                    hasSession: !!verifySession,
+                                    userId: verifySession?.user?.id,
+                                    sessionMatch: verifySession?.user?.id === sessionData.session?.user?.id
+                                });
+                                
+                                if (!verifySession) {
+                                    console.error('[LoginScreen] ⚠️ Sessão não encontrada após verificação, mas continuando...');
+                                    // Try to use the session we just set anyway
+                                }
+                                
+                                console.log('[LoginScreen] Verificando role e redirecionando...');
+                                
                                 // Always check role and redirect appropriately
+                                // redirectToApp will manage isProcessingLoginRef and globalRedirectInProgress internally
                                 await redirectToApp();
-                            } catch (e) {
-                                console.error('Session exception:', e);
-                                // Even on error, try to redirect
-                                await redirectToApp();
+                                
+                                // Reset loading flag after redirect attempt
+                                setLoading(false);
+                            } catch (e: any) {
+                                console.error('[LoginScreen] ========== EXCEÇÃO ==========');
+                                console.error('[LoginScreen] Tipo:', e?.constructor?.name);
+                                console.error('[LoginScreen] Mensagem:', e?.message);
+                                console.error('[LoginScreen] Stack:', e?.stack);
+                                Alert.alert('Erro', e?.message || 'Erro ao fazer login. Tente novamente.');
+                                isProcessingLoginRef.current = false;
+                                setLoading(false);
                             }
                             return;
                         }
@@ -134,6 +387,7 @@ export default function LoginScreen() {
     };
 
     if (checking) {
+        console.log('🔵 [LoginScreen] Still checking session, showing loading...');
         return (
             <GradientBackground>
                 <View style={styles.loadingContainer}>
@@ -144,6 +398,7 @@ export default function LoginScreen() {
         );
     }
 
+    console.log('🔵 [LoginScreen] ✅ Rendering login screen UI (checking=false, loading=' + loading + ')');
     return (
         <GradientBackground>
             <View style={styles.container}>

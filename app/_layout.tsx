@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from '../contexts/AuthContext';
@@ -14,7 +13,13 @@ export default function RootLayout() {
           animation: 'slide_from_right',
         }}
       >
-        <Stack.Screen name="index" />
+        <Stack.Screen 
+          name="index" 
+          options={{
+            // Ensure index screen can be rendered when navigating from groups
+            presentation: 'card',
+          }}
+        />
         <Stack.Screen name="select-role" />
         <Stack.Screen name="(customer)" />
         <Stack.Screen name="(merchant)" />
