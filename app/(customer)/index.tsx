@@ -7,19 +7,21 @@ import {
     ActivityIndicator,
     Alert,
     FlatList,
-    Image,
-    ImageErrorEventData,
-    NativeSyntheticEvent,
     RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
-    View,
+    View
 } from 'react-native';
+import Animated from 'react-native-reanimated';
+import { SkeletonProductCard } from '../../components/base/Skeleton';
+import { EmptyState } from '../../components/feedback/EmptyState';
 import { GradientBackground } from '../../components/GradientBackground';
+import { AnimatedBatchCard } from '../../components/product/AnimatedBatchCard';
 import { Colors } from '../../constants/Colors';
+import { DesignTokens } from '../../constants/designTokens';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCart } from '../../contexts/CartContext';
 import { api, Batch } from '../../services/api';
@@ -155,6 +157,22 @@ export default function VitrineScreen() {
     // Filter batches based on search query and filters
     const filteredBatches = useMemo(() => {
         let filtered = batches;
+
+        // FILTRO PRINCIPAL: Remover produtos vencidos (não podem aparecer para o cliente)
+        filtered = filtered.filter(batch => {
+            const expirationDate = batch.expiration_date || batch.data_vencimento;
+            if (!expirationDate) return true; // Se não tem data, mantém (pode ser produto sem validade)
+            
+            const expDate = new Date(expirationDate);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            expDate.setHours(0, 0, 0, 0);
+            const diffTime = expDate.getTime() - today.getTime();
+            const daysToExpire = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            
+            // Só mantém se não estiver vencido (daysToExpire >= 0)
+            return daysToExpire >= 0;
+        });
 
         // Filtro de busca por texto
         if (searchQuery.trim()) {
@@ -364,284 +382,29 @@ export default function VitrineScreen() {
         </TouchableOpacity>
     );
 
-    const renderBatch = ({ item }: { item: Batch }) => {
-        // Handle both PT-BR and EN field names - backend may return products (plural) or product (singular)
-        const productData = (item as any).products || item.product;
-        const productName = productData?.nome || productData?.name || 'Produto sem nome';
-        const productPhoto = productData?.foto1 || productData?.photo1 || null;
-        const productCategory = productData?.categoria || productData?.category || '';
-        
-        // Prices - handle both PT-BR and EN field names
-        const originalPrice = item.original_price ?? item.preco_normal_override ?? productData?.preco_normal ?? 0;
-        const promoPrice = item.promo_price ?? item.preco_promocional ?? 0;
-        
-        // Calcular desconto se não vier do backend ou calcular baseado nos preços
-        let discountPercent = item.discount_percent ?? item.desconto_percentual ?? 0;
-        
-        // Se não tem desconto explícito mas tem diferença de preço, calcular
-        if ((discountPercent === 0 || !discountPercent || isNaN(discountPercent)) && originalPrice > 0 && promoPrice > 0 && originalPrice > promoPrice) {
-            discountPercent = ((originalPrice - promoPrice) / originalPrice) * 100;
-        }
-        
-        // Garantir que temos um número válido
-        discountPercent = Math.max(0, Math.min(100, discountPercent || 0));
-        
-        // Debug: logar valores para verificar
-        if (originalPrice > promoPrice && discountPercent === 0) {
-            console.log('[Vitrine] Desconto calculado:', {
-                originalPrice,
-                promoPrice,
-                calculatedDiscount: ((originalPrice - promoPrice) / originalPrice) * 100,
-                itemDiscount: item.discount_percent ?? item.desconto_percentual
-            });
-        }
-        
-        // Store info
-        const storeName = item.store?.name || (item.store as any)?.nome || 'Loja';
-        const storeHours = item.store?.hours || (item.store as any)?.horario_funcionamento || '';
-        const storeLogo = item.store?.logo_url || null;
-        
-        // Stock
+    const renderBatch = ({ item, index }: { item: Batch; index: number }) => {
         const availableStock = item.disponivel ?? item.stock ?? item.estoque_total ?? 0;
         const selectedQuantity = selectedQuantities[item.id] || 1;
-        
-        // Expiration date and days calculation
-        const expirationDate = item.expiration_date || item.data_vencimento || null;
-        let expirationDisplay = 'N/A';
-        let expirationDateFormatted = '';
-        let daysToExpire: number | null = null;
-        if (expirationDate) {
-            const expDate = new Date(expirationDate);
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            expDate.setHours(0, 0, 0, 0);
-            const diffTime = expDate.getTime() - today.getTime();
-            daysToExpire = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            
-            expirationDateFormatted = expDate.toLocaleDateString('pt-BR', { 
-                day: '2-digit', 
-                month: '2-digit', 
-                year: 'numeric' 
-            });
-            
-            if (daysToExpire < 0) {
-                expirationDisplay = 'Vencido';
-            } else if (daysToExpire === 0) {
-                expirationDisplay = 'Vence hoje';
-            } else if (daysToExpire === 1) {
-                expirationDisplay = 'Vence amanhã';
-            } else {
-                expirationDisplay = `${daysToExpire} dias`;
-            }
-        }
-        
         const imageKey = item.id;
         const imageError = imageErrors.has(imageKey);
-        const imageUri = productPhoto && !imageError ? productPhoto : null;
-        
-        const handleImageError = (e: NativeSyntheticEvent<ImageErrorEventData>) => {
-            console.log('Erro ao carregar imagem do produto:', imageUri);
-            setImageErrors(prev => new Set(prev).add(imageKey));
-        };
 
-        const storeId = item.store_id || (item.store as any)?.id;
-        
         return (
-            <View style={styles.productCardHorizontal}>
-                {/* Store Logo - Topo centralizado, metade dentro/metade fora - Clicável para ir à loja */}
-                {storeLogo && storeId && (
-                    <TouchableOpacity
-                        style={styles.storeLogoTopContainer}
-                        onPress={() => {
-                            // Navegar para produtos da loja
-                            router.push({
-                                pathname: '/(customer)/store-products',
-                                params: { storeId }
-                            });
-                        }}
-                        activeOpacity={0.8}
-                    >
-                        <View style={styles.storeLogoTop}>
-                            <Image
-                                source={{ uri: storeLogo }}
-                                style={styles.storeLogoTopImage}
-                                resizeMode="cover"
-                            />
-                        </View>
-                    </TouchableOpacity>
-                )}
-
-                {/* Imagem do produto - Clicável para ver detalhes */}
-                <TouchableOpacity
-                    style={styles.productImageContainerHorizontal}
-                    onPress={() => router.push(`/product/${item.id}`)}
-                    activeOpacity={0.9}
-                >
-                    {imageUri ? (
-                        <Image
-                            source={{ uri: imageUri }}
-                            style={styles.productImageHorizontal}
-                            resizeMode="cover"
-                            onError={handleImageError}
-                        />
-                    ) : (
-                        <View style={styles.imagePlaceholderHorizontal}>
-                            <Ionicons name="image-outline" size={40} color={Colors.textMuted} />
-                            <Text style={styles.imagePlaceholderText}>Sem imagem</Text>
-                        </View>
-                    )}
-                    
-                    {/* Discount badge - porcentagem de desconto grande e visível */}
-                    {discountPercent > 0 && (
-                        <View style={styles.discountBadgeLarge}>
-                            <Text style={styles.discountTextLarge}>-{Math.round(discountPercent)}%</Text>
-                        </View>
-                    )}
-                </TouchableOpacity>
-
-                <View style={styles.productInfoHorizontal}>
-                    {/* Store name */}
-                    <Text style={styles.storeNameHorizontal} numberOfLines={1}>
-                        {storeName}
-                    </Text>
-                    
-                    {/* Product name */}
-                    <Text style={styles.productNameHorizontal} numberOfLines={2}>
-                        {productName}
-                    </Text>
-                    
-                    {/* Store hours - aumentado tamanho */}
-                    {storeHours && (
-                        <View style={styles.storeHoursRow}>
-                            <Ionicons name="time-outline" size={14} color={Colors.textMuted} />
-                            <Text style={styles.storeHoursText} numberOfLines={1}>
-                                {storeHours}
-                            </Text>
-                        </View>
-                    )}
-                    
-                    {/* Price row - sem porcentagem (já está na foto) */}
-                    <View style={styles.priceRowHorizontal}>
-                        <View style={styles.priceContainerHorizontal}>
-                            {originalPrice > promoPrice && (
-                                <Text style={styles.originalPriceHorizontal}>
-                                    R$ {originalPrice.toFixed(2).replace('.', ',')}
-                                </Text>
-                            )}
-                            <Text style={styles.promoPriceHorizontal}>
-                                R$ {promoPrice.toFixed(2).replace('.', ',')}
-                            </Text>
-                        </View>
-                    </View>
-
-                    {/* Expiration date - mais visível */}
-                    {expirationDate && (
-                        <View style={styles.expirationRowHorizontal}>
-                            <Ionicons 
-                                name="calendar-outline" 
-                                size={14} 
-                                color={daysToExpire !== null && daysToExpire <= 2 ? Colors.error : Colors.warning} 
-                            />
-                            <View style={styles.expirationInfo}>
-                                <Text style={[
-                                    styles.expirationTextHorizontal,
-                                    daysToExpire !== null && daysToExpire <= 2 && styles.expirationTextUrgent
-                                ]}>
-                                    {expirationDisplay}
-                                </Text>
-                                <Text style={styles.expirationDateText}>
-                                    {expirationDateFormatted}
-                                </Text>
-                            </View>
-                        </View>
-                    )}
-
-                    {/* Stock and quantity selector */}
-                    <View style={styles.stockQuantityRow}>
-                        <View style={styles.stockInfo}>
-                            <Ionicons name="cube-outline" size={12} color={Colors.textMuted} />
-                            <Text style={styles.stockText}>
-                                {availableStock > 0 ? `${availableStock} disponível(eis)` : 'Esgotado'}
-                            </Text>
-                        </View>
-                        
-                        {/* Quantity selector */}
-                        {availableStock > 0 && (
-                            <View style={styles.quantitySelector}>
-                                <TouchableOpacity
-                                    style={[styles.quantityButton, selectedQuantity <= 1 && styles.quantityButtonDisabled]}
-                                    onPress={(e) => {
-                                        e.stopPropagation();
-                                        handleQuantityChange(item.id, -1);
-                                    }}
-                                    disabled={selectedQuantity <= 1}
-                                >
-                                    <Ionicons 
-                                        name="remove" 
-                                        size={16} 
-                                        color={selectedQuantity <= 1 ? Colors.textMuted : Colors.text} 
-                                    />
-                                </TouchableOpacity>
-                                <Text style={styles.quantityText}>{selectedQuantity}</Text>
-                                <TouchableOpacity
-                                    style={[styles.quantityButton, selectedQuantity >= availableStock && styles.quantityButtonDisabled]}
-                                    onPress={(e) => {
-                                        e.stopPropagation();
-                                        handleQuantityChange(item.id, 1);
-                                    }}
-                                    disabled={selectedQuantity >= availableStock}
-                                >
-                                    <Ionicons 
-                                        name="add" 
-                                        size={16} 
-                                        color={selectedQuantity >= availableStock ? Colors.textMuted : Colors.text} 
-                                    />
-                                </TouchableOpacity>
-                            </View>
-                        )}
-                    </View>
-
-                    {/* Add button - parte inferior do card */}
-                    <TouchableOpacity
-                        style={[
-                            styles.addButtonHorizontal,
-                            availableStock === 0 && styles.addButtonDisabled
-                        ]}
-                        onPress={(e) => {
-                            e.stopPropagation();
-                            if (availableStock > 0) {
-                                handleAddToCart(item);
-                            }
-                        }}
-                        disabled={availableStock === 0}
-                    >
-                        <Ionicons 
-                            name={availableStock > 0 ? "cart" : "close-circle"} 
-                            size={16} 
-                            color={Colors.text} 
-                        />
-                        <Text style={styles.addButtonTextHorizontal}>
-                            {availableStock > 0 ? `Adicionar ${selectedQuantity > 1 ? `${selectedQuantity}x` : ''}` : 'Esgotado'}
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
+            <AnimatedBatchCard
+                batch={item}
+                index={index}
+                selectedQuantity={selectedQuantity}
+                availableStock={availableStock}
+                imageError={imageError}
+                onQuantityChange={handleQuantityChange}
+                onAddToCart={handleAddToCart}
+                onImageError={(key) => setImageErrors(prev => new Set(prev).add(key))}
+            />
         );
     };
 
     // Skeleton loader component
     const renderSkeletonCard = () => (
-        <View style={styles.productCardHorizontal}>
-            <View style={[styles.productImageContainerHorizontal, styles.skeleton]}>
-                <ActivityIndicator size="small" color={Colors.primary} />
-            </View>
-            <View style={styles.productInfoHorizontal}>
-                <View style={[styles.skeleton, styles.skeletonText, { width: '60%', marginBottom: 8 }]} />
-                <View style={[styles.skeleton, styles.skeletonText, { width: '100%', marginBottom: 4 }]} />
-                <View style={[styles.skeleton, styles.skeletonText, { width: '80%', marginBottom: 12 }]} />
-                <View style={[styles.skeleton, { width: '100%', height: 36, borderRadius: 10 }]} />
-            </View>
-        </View>
+        <SkeletonProductCard style={{ marginRight: DesignTokens.spacing.md }} />
     );
 
     if (loading) {
@@ -690,14 +453,14 @@ export default function VitrineScreen() {
         <GradientBackground>
             <View style={styles.container}>
                 {/* Header Compacto */}
-                <View style={styles.header}>
+                <Animated.View style={styles.header}>
                     <View style={styles.headerContent}>
                         <Text style={styles.greeting}>
                             Olá{user?.name ? `, ${user.name.split(' ')[0]}` : ''}! 👋
                         </Text>
                         <Text style={styles.title}>Ofertas do dia</Text>
                     </View>
-                </View>
+                </Animated.View>
 
                 {/* Search Bar Compacto */}
                 <View style={styles.searchContainer}>
@@ -705,7 +468,7 @@ export default function VitrineScreen() {
                         <Ionicons name="search" size={18} color={Colors.textMuted} />
                         <TextInput
                             style={[styles.searchInput, { color: Colors.text }]}
-                            placeholder="Buscar..."
+                            placeholder="Buscar produtos, lojas..."
                             placeholderTextColor={Colors.textMuted}
                             value={searchQuery}
                             onChangeText={setSearchQuery}
@@ -713,9 +476,15 @@ export default function VitrineScreen() {
                             autoCapitalize="none"
                             selectionColor={Colors.primary}
                             cursorColor={Colors.primary}
+                            accessibilityLabel="Campo de busca"
+                            accessibilityHint="Digite para buscar produtos ou lojas"
                         />
                         {searchQuery.length > 0 && (
-                            <TouchableOpacity onPress={() => setSearchQuery('')}>
+                            <TouchableOpacity 
+                                onPress={() => setSearchQuery('')}
+                                accessibilityRole="button"
+                                accessibilityLabel="Limpar busca"
+                            >
                                 <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
                             </TouchableOpacity>
                         )}
@@ -726,6 +495,9 @@ export default function VitrineScreen() {
                             ]}
                             onPress={() => setShowFilters(!showFilters)}
                             activeOpacity={0.7}
+                            accessibilityRole="button"
+                            accessibilityLabel="Filtros"
+                            accessibilityHint="Abrir ou fechar painel de filtros"
                         >
                             <Ionicons 
                                 name="filter" 
@@ -888,36 +660,32 @@ export default function VitrineScreen() {
 
                 {/* Products - Lista Horizontal */}
                 {filteredBatches.length === 0 ? (
-                    <View style={styles.emptyContainer}>
-                        <View style={styles.emptyIcon}>
-                            <Ionicons name="search-outline" size={64} color={Colors.textMuted} />
-                        </View>
-                        <Text style={styles.emptyText}>
-                            {searchQuery ? 'Nenhum resultado' : 'Nenhuma oferta encontrada'}
-                        </Text>
-                        <Text style={styles.emptySubtext}>
-                            {searchQuery
+                    <EmptyState
+                        icon={searchQuery ? "search-outline" : "storefront-outline"}
+                        title={searchQuery ? 'Nenhum resultado' : 'Nenhuma oferta encontrada'}
+                        message={
+                            searchQuery
                                 ? `Não encontramos produtos para "${searchQuery}"`
                                 : selectedCategory
                                     ? 'Tente outra categoria ou aumente o raio de busca'
                                     : 'Não há ofertas disponíveis na sua região ainda'
-                            }
-                        </Text>
-                    </View>
+                        }
+                        actionLabel={searchQuery ? undefined : "Ajustar Localização"}
+                        onAction={searchQuery ? undefined : () => router.push('/(customer)/setup')}
+                    />
                 ) : (
                     <View style={styles.productsWrapper}>
                         {searchQuery && (
                             <Text style={styles.searchResultsText}>
-                                {filteredBatches.length} resultado(s) para "{searchQuery}"
+                                {filteredBatches.length} resultado(s) para &quot;{searchQuery}&quot;
                             </Text>
                         )}
                         <FlatList
                             data={filteredBatches}
                             renderItem={renderBatch}
                             keyExtractor={(item) => item.id}
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.productsContainerHorizontal}
+                            showsVerticalScrollIndicator={false}
+                            contentContainerStyle={styles.productsContainerVertical}
                             style={styles.productsList}
                             refreshControl={
                                 <RefreshControl
@@ -935,6 +703,10 @@ export default function VitrineScreen() {
                                     </View>
                                 ) : null
                             }
+                            removeClippedSubviews={false}
+                            maxToRenderPerBatch={10}
+                            windowSize={10}
+                            initialNumToRender={5}
                         />
                     </View>
                 )}
@@ -967,13 +739,12 @@ const styles = StyleSheet.create({
         flexDirection: 'column',
     },
     greeting: {
-        fontSize: 13,
+        ...DesignTokens.typography.small,
         color: Colors.textSecondary,
-        marginBottom: 2,
+        marginBottom: DesignTokens.spacing.xs,
     },
     title: {
-        fontSize: 24,
-        fontWeight: '700',
+        ...DesignTokens.typography.h2,
         color: Colors.text,
     },
     locationInfo: {
@@ -984,7 +755,7 @@ const styles = StyleSheet.create({
         gap: 6,
     },
     locationText: {
-        fontSize: 12,
+        ...DesignTokens.typography.caption,
         color: Colors.textSecondary,
     },
     categoriesWrapper: {
@@ -1001,46 +772,37 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
     },
     categoryChip: {
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: 20,
+        paddingHorizontal: DesignTokens.spacing.md - 2,
+        paddingVertical: DesignTokens.spacing.sm,
+        borderRadius: DesignTokens.borderRadius.full,
         backgroundColor: Colors.glass,
         borderWidth: 1.5,
         borderColor: Colors.glassBorder,
-        marginRight: 8,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
-        elevation: 2,
+        marginRight: DesignTokens.spacing.sm,
+        ...DesignTokens.shadows.sm,
+        minHeight: DesignTokens.touchTargets.min - 4,
     },
     categoryChipActive: {
         backgroundColor: Colors.primary,
         borderColor: Colors.primary,
-        shadowColor: Colors.primary,
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 4,
+        ...DesignTokens.shadows.md,
     },
     categoryText: {
-        fontSize: 12,
+        ...DesignTokens.typography.captionBold,
         color: Colors.textSecondary,
-        fontWeight: '600',
     },
     categoryTextActive: {
         color: Colors.text,
-        fontWeight: '700',
     },
     filterButton: {
-        padding: 6,
-        marginLeft: 4,
-        borderRadius: 8,
+        padding: DesignTokens.spacing.xs + 2,
+        marginLeft: DesignTokens.spacing.xs,
+        borderRadius: DesignTokens.borderRadius.sm,
         backgroundColor: 'transparent',
         alignItems: 'center',
         justifyContent: 'center',
-        width: 36,
-        height: 36,
+        minWidth: DesignTokens.touchTargets.min,
+        minHeight: DesignTokens.touchTargets.min,
     },
     filterButtonActive: {
         backgroundColor: Colors.primary + '20',
@@ -1182,25 +944,26 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
         paddingVertical: 8,
         paddingTop: 10,
-        paddingBottom: 40,
+        paddingBottom: 60,
         gap: 16,
     },
+    productsContainerVertical: {
+        paddingHorizontal: DesignTokens.spacing.lg,
+        paddingVertical: DesignTokens.spacing.md,
+        paddingBottom: DesignTokens.spacing.xxl,
+    },
     productCardHorizontal: {
-        width: 300,
+        width: 280, // Reduzido de 300 para melhor visualização
         minHeight: 460,
         backgroundColor: Colors.backgroundCard,
-        borderRadius: 20,
+        borderRadius: DesignTokens.borderRadius.xl,
         borderWidth: 1.5,
         borderColor: Colors.glassBorder,
         overflow: 'visible',
         marginRight: 16,
         marginTop: 25,
         marginBottom: 30,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 8,
-        elevation: 5,
+        ...DesignTokens.shadows.md,
         position: 'relative',
     },
     storeLogoTopContainer: {
@@ -1477,11 +1240,6 @@ const styles = StyleSheet.create({
         gap: 4,
         flex: 1,
     },
-    stockText: {
-        fontSize: 11,
-        color: Colors.textMuted,
-        fontWeight: '500',
-    },
     quantitySelector: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -1542,32 +1300,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         width: 100,
     },
-    emptyContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 48,
-    },
-    emptyIcon: {
-        width: 120,
-        height: 120,
-        borderRadius: 60,
-        backgroundColor: Colors.glass,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 24,
-    },
-    emptyText: {
-        fontSize: 20,
-        fontWeight: '600',
-        color: Colors.text,
-        marginBottom: 8,
-    },
-    emptySubtext: {
-        fontSize: 14,
-        color: Colors.textSecondary,
-        textAlign: 'center',
-    },
     searchContainer: {
         paddingHorizontal: 20,
         marginBottom: 12,
@@ -1576,17 +1308,17 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: Colors.glass,
-        borderRadius: 12,
+        borderRadius: DesignTokens.borderRadius.md,
         borderWidth: 1,
         borderColor: Colors.glassBorder,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        gap: 8,
-        height: 44,
+        paddingHorizontal: DesignTokens.spacing.md,
+        paddingVertical: DesignTokens.spacing.sm + 2,
+        gap: DesignTokens.spacing.sm,
+        minHeight: DesignTokens.touchTargets.min,
     },
     searchInput: {
         flex: 1,
-        fontSize: 14,
+        ...DesignTokens.typography.body,
         color: Colors.text,
         padding: 0,
         margin: 0,

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import {
@@ -16,9 +16,12 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { Button } from '../../components/base/Button';
+import { EmptyState } from '../../components/feedback/EmptyState';
 import { GradientBackground } from '../../components/GradientBackground';
 import { ProfileRequiredModal } from '../../components/ProfileRequiredModal';
 import { Colors } from '../../constants/Colors';
+import { DesignTokens } from '../../constants/designTokens';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCart } from '../../contexts/CartContext';
 import { api, Cart, CartItem } from '../../services/api';
@@ -190,6 +193,7 @@ export default function CartScreen() {
     };
 
     const handleRemove = async (batchId: string) => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         Alert.alert(
             'Remover Produto',
             'Deseja remover este produto do carrinho?',
@@ -199,6 +203,7 @@ export default function CartScreen() {
                     text: 'Remover',
                     style: 'destructive',
                     onPress: async () => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                         try {
                             console.log('[Cart] Removendo item com batchId:', batchId);
                             // Atualização otimista - remover da UI imediatamente
@@ -432,6 +437,9 @@ export default function CartScreen() {
                             style={[styles.quantityButton, item.quantity <= 1 && styles.quantityButtonDisabled]}
                             onPress={() => handleUpdateQuantity(batchId, item.quantity - 1, availableStock, item.quantity)}
                             disabled={item.quantity <= 1}
+                            accessibilityRole="button"
+                            accessibilityLabel="Diminuir quantidade"
+                            accessibilityHint={`Quantidade atual: ${item.quantity}`}
                         >
                             <Ionicons 
                                 name="remove" 
@@ -439,7 +447,12 @@ export default function CartScreen() {
                                 color={item.quantity <= 1 ? Colors.textMuted : Colors.text} 
                             />
                         </TouchableOpacity>
-                        <Text style={styles.quantityText}>{item.quantity}</Text>
+                        <Text 
+                            style={styles.quantityText}
+                            accessibilityLabel={`Quantidade: ${item.quantity}`}
+                        >
+                            {item.quantity}
+                        </Text>
                         <TouchableOpacity
                             style={[
                                 styles.quantityButton, 
@@ -447,6 +460,9 @@ export default function CartScreen() {
                             ]}
                             onPress={() => handleUpdateQuantity(batchId, item.quantity + 1, availableStock, item.quantity)}
                             disabled={item.quantity >= availableStock}
+                            accessibilityRole="button"
+                            accessibilityLabel="Aumentar quantidade"
+                            accessibilityHint={`Quantidade atual: ${item.quantity}, disponível: ${availableStock}`}
                         >
                             <Ionicons 
                                 name="add" 
@@ -460,6 +476,9 @@ export default function CartScreen() {
                     <TouchableOpacity
                         style={styles.removeButton}
                         onPress={() => handleRemove(batchId)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Remover produto do carrinho"
+                        accessibilityHint={`Remove ${productName} do carrinho`}
                     >
                         <Ionicons name="trash-outline" size={18} color={Colors.error} />
                     </TouchableOpacity>
@@ -511,20 +530,17 @@ export default function CartScreen() {
                     </View>
                 </View>
 
-                <TouchableOpacity
+                <Button
+                    title="Pagar com PIX"
                     onPress={() => handleCheckout(item.storeId)}
-                    activeOpacity={0.8}
-                >
-                    <LinearGradient
-                        colors={[Colors.gradientStart, Colors.gradientEnd]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                        style={styles.checkoutButton}
-                    >
-                        <Ionicons name="qr-code" size={20} color={Colors.text} />
-                        <Text style={styles.checkoutText}>Pagar com PIX</Text>
-                    </LinearGradient>
-                </TouchableOpacity>
+                    variant="primary"
+                    size="lg"
+                    leftIcon={<Ionicons name="qr-code" size={20} color={Colors.text} />}
+                    fullWidth
+                    hapticFeedback
+                    accessibilityLabel={`Pagar R$ ${item.total.toFixed(2)} com PIX`}
+                    accessibilityHint="Gerar código PIX para pagamento"
+                />
             </View>
         </View>
     );
@@ -554,21 +570,13 @@ export default function CartScreen() {
                 </View>
 
                 {groupedCart.length === 0 ? (
-                    <View style={styles.emptyContainer}>
-                        <View style={styles.emptyIcon}>
-                            <Ionicons name="cart-outline" size={64} color={Colors.textMuted} />
-                        </View>
-                        <Text style={styles.emptyText}>Seu carrinho está vazio</Text>
-                        <Text style={styles.emptySubtext}>
-                            Adicione produtos da vitrine para começar
-                        </Text>
-                        <TouchableOpacity
-                            style={styles.exploreButton}
-                            onPress={() => router.push('/(customer)')}
-                        >
-                            <Text style={styles.exploreButtonText}>Explorar Vitrine</Text>
-                        </TouchableOpacity>
-                    </View>
+                    <EmptyState
+                        icon="cart-outline"
+                        title="Seu carrinho está vazio"
+                        message="Adicione produtos da vitrine para começar suas compras"
+                        actionLabel="Explorar Vitrine"
+                        onAction={() => router.push('/(customer)')}
+                    />
                 ) : (
                     <FlatList
                         data={groupedCart}
@@ -583,6 +591,10 @@ export default function CartScreen() {
                                 tintColor={Colors.primary}
                             />
                         }
+                        removeClippedSubviews={true}
+                        maxToRenderPerBatch={10}
+                        windowSize={10}
+                        initialNumToRender={5}
                     />
                 )}
 
@@ -621,13 +633,12 @@ const styles = StyleSheet.create({
         marginBottom: 24,
     },
     title: {
-        fontSize: 28,
-        fontWeight: '700',
+        ...DesignTokens.typography.h1,
         color: Colors.text,
-        marginBottom: 4,
+        marginBottom: DesignTokens.spacing.xs,
     },
     subtitle: {
-        fontSize: 14,
+        ...DesignTokens.typography.small,
         color: Colors.textSecondary,
     },
     listContent: {
@@ -636,11 +647,12 @@ const styles = StyleSheet.create({
     },
     storeGroup: {
         backgroundColor: Colors.backgroundCard,
-        borderRadius: 20,
+        borderRadius: DesignTokens.borderRadius.xl,
         borderWidth: 1,
         borderColor: Colors.glassBorder,
-        marginBottom: 16,
+        marginBottom: DesignTokens.spacing.md,
         overflow: 'hidden',
+        ...DesignTokens.shadows.sm,
     },
     storeHeader: {
         padding: 16,
@@ -749,9 +761,9 @@ const styles = StyleSheet.create({
         borderColor: Colors.glassBorder,
     },
     quantityButton: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
+        width: DesignTokens.touchTargets.min,
+        height: DesignTokens.touchTargets.min,
+        borderRadius: DesignTokens.borderRadius.full,
         backgroundColor: Colors.primary,
         alignItems: 'center',
         justifyContent: 'center',
@@ -768,9 +780,13 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
     removeButton: {
-        padding: 8,
-        borderRadius: 8,
-        backgroundColor: Colors.error + '15',
+        padding: DesignTokens.spacing.sm,
+        borderRadius: DesignTokens.borderRadius.sm,
+        backgroundColor: Colors.error15,
+        minWidth: DesignTokens.touchTargets.min,
+        minHeight: DesignTokens.touchTargets.min,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     storeFooter: {
         padding: 20,
@@ -813,57 +829,6 @@ const styles = StyleSheet.create({
         fontSize: 22,
         fontWeight: '700',
         color: Colors.success,
-    },
-    checkoutButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 14,
-        borderRadius: 12,
-        gap: 8,
-    },
-    checkoutText: {
-        fontSize: 15,
-        fontWeight: '600',
-        color: Colors.text,
-    },
-    emptyContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 48,
-    },
-    emptyIcon: {
-        width: 120,
-        height: 120,
-        borderRadius: 60,
-        backgroundColor: Colors.glass,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 24,
-    },
-    emptyText: {
-        fontSize: 20,
-        fontWeight: '600',
-        color: Colors.text,
-        marginBottom: 8,
-    },
-    emptySubtext: {
-        fontSize: 14,
-        color: Colors.textSecondary,
-        textAlign: 'center',
-        marginBottom: 24,
-    },
-    exploreButton: {
-        paddingVertical: 14,
-        paddingHorizontal: 32,
-        borderRadius: 12,
-        backgroundColor: Colors.primary,
-    },
-    exploreButtonText: {
-        fontSize: 15,
-        fontWeight: '600',
-        color: Colors.text,
     },
     infoNote: {
         flexDirection: 'row',

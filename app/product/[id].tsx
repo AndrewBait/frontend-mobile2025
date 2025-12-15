@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -13,8 +13,11 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { Badge } from '../../components/base/Badge';
+import { Button } from '../../components/base/Button';
 import { GradientBackground } from '../../components/GradientBackground';
 import { Colors } from '../../constants/Colors';
+import { DesignTokens } from '../../constants/designTokens';
 import { useCart } from '../../contexts/CartContext';
 import { api, Batch } from '../../services/api';
 
@@ -59,6 +62,9 @@ export default function ProductDetailScreen() {
     };
 
     const handleAddToCart = async () => {
+        // Haptic feedback
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        
         // ATUALIZAÇÃO OTIMISTA: Atualizar badge imediatamente
         incrementCartCount(quantity);
         
@@ -74,6 +80,9 @@ export default function ProductDetailScreen() {
                 return itemBatchId === id;
             });
             const totalInCart = cartItem?.quantity || quantity;
+            
+            // Success haptic
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             
             Alert.alert(
                 '✅ Adicionado',
@@ -251,9 +260,12 @@ export default function ProductDetailScreen() {
                             style={styles.productImage}
                         />
                         {discountPercent > 0 && (
-                            <View style={styles.discountBadge}>
-                                <Text style={styles.discountText}>-{Math.round(discountPercent)}%</Text>
-                            </View>
+                            <Badge
+                                label={`-${Math.round(discountPercent)}%`}
+                                variant="error"
+                                size="md"
+                                style={styles.discountBadge}
+                            />
                         )}
                     </View>
 
@@ -273,9 +285,12 @@ export default function ProductDetailScreen() {
 
                         {/* Category */}
                         {(productData?.categoria || productData?.category) && (
-                            <View style={styles.categoryChip}>
-                                <Text style={styles.categoryText}>{productData?.categoria || productData?.category}</Text>
-                            </View>
+                            <Badge
+                                label={productData?.categoria || productData?.category}
+                                variant="primary"
+                                size="md"
+                                style={styles.categoryBadge}
+                            />
                         )}
 
                         {/* Description */}
@@ -296,11 +311,12 @@ export default function ProductDetailScreen() {
                                 </Text>
                             </View>
                             {originalPrice > promoPrice && (
-                                <View style={styles.savingsBox}>
-                                    <Text style={styles.savingsText}>
-                                        Economia de R$ {(originalPrice - promoPrice).toFixed(2).replace('.', ',')}
-                                    </Text>
-                                </View>
+                                <Badge
+                                    label={`Economia R$ ${(originalPrice - promoPrice).toFixed(2).replace('.', ',')}`}
+                                    variant="success"
+                                    size="sm"
+                                    icon="checkmark-circle"
+                                />
                             )}
                         </View>
 
@@ -370,21 +386,18 @@ export default function ProductDetailScreen() {
                         </TouchableOpacity>
                     </View>
 
-                    <TouchableOpacity
-                        style={styles.addButton}
+                    <Button
+                        title={`Adicionar • R$ ${(promoPrice * quantity).toFixed(2).replace('.', ',')}`}
                         onPress={handleAddToCart}
+                        variant="primary"
+                        size="lg"
                         disabled={(batch.stock ?? batch.estoque_total ?? 0) === 0}
-                    >
-                        <LinearGradient
-                            colors={[Colors.primary, Colors.primaryDark]}
-                            style={styles.addButtonGradient}
-                        >
-                            <Ionicons name="cart" size={20} color={Colors.text} />
-                            <Text style={styles.addButtonText}>
-                                Adicionar • R$ {(promoPrice * quantity).toFixed(2).replace('.', ',')}
-                            </Text>
-                        </LinearGradient>
-                    </TouchableOpacity>
+                        leftIcon={<Ionicons name="cart" size={20} color={Colors.text} />}
+                        fullWidth
+                        hapticFeedback
+                        accessibilityLabel={`Adicionar ${quantity} unidade(s) ao carrinho`}
+                        accessibilityHint={`Total: R$ ${(promoPrice * quantity).toFixed(2)}`}
+                    />
                 </View>
             </View>
         </GradientBackground>
@@ -411,9 +424,9 @@ const styles = StyleSheet.create({
         zIndex: 10,
     },
     headerButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 14,
+        width: DesignTokens.touchTargets.min,
+        height: DesignTokens.touchTargets.min,
+        borderRadius: DesignTokens.borderRadius.lg,
         backgroundColor: Colors.glass,
         borderWidth: 1,
         borderColor: Colors.glassBorder,
@@ -470,23 +483,13 @@ const styles = StyleSheet.create({
         color: Colors.textSecondary,
     },
     productName: {
-        fontSize: 24,
-        fontWeight: '700',
+        ...DesignTokens.typography.h2,
         color: Colors.text,
-        marginBottom: 12,
+        marginBottom: DesignTokens.spacing.md,
     },
-    categoryChip: {
+    categoryBadge: {
+        marginBottom: DesignTokens.spacing.md,
         alignSelf: 'flex-start',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        backgroundColor: Colors.primary + '20',
-        borderRadius: 8,
-        marginBottom: 16,
-    },
-    categoryText: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: Colors.primary,
     },
     description: {
         fontSize: 14,
@@ -509,17 +512,7 @@ const styles = StyleSheet.create({
         fontSize: 32,
         fontWeight: '800',
         color: Colors.success,
-    },
-    savingsBox: {
-        backgroundColor: Colors.success + '15',
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 10,
-    },
-    savingsText: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: Colors.success,
+        letterSpacing: -0.5,
     },
     infoCards: {
         flexDirection: 'row',
@@ -589,9 +582,9 @@ const styles = StyleSheet.create({
         padding: 4,
     },
     quantityButton: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
+        width: DesignTokens.touchTargets.min,
+        height: DesignTokens.touchTargets.min,
+        borderRadius: DesignTokens.borderRadius.md,
         backgroundColor: Colors.primary,
         alignItems: 'center',
         justifyContent: 'center',
@@ -604,19 +597,5 @@ const styles = StyleSheet.create({
     },
     addButton: {
         flex: 1,
-        borderRadius: 12,
-        overflow: 'hidden',
-    },
-    addButtonGradient: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 14,
-        gap: 8,
-    },
-    addButtonText: {
-        fontSize: 15,
-        fontWeight: '600',
-        color: Colors.text,
     },
 });

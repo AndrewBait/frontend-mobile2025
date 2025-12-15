@@ -1,22 +1,30 @@
-import React, { useState, useEffect } from 'react';
-import {
-    StyleSheet,
-    View,
-    Text,
-    ScrollView,
-    TouchableOpacity,
-    ActivityIndicator,
-    Alert,
-    Clipboard,
-} from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import {
+    ActivityIndicator,
+    Clipboard,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
+} from 'react-native';
+import Animated, {
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring,
+    withTiming
+} from 'react-native-reanimated';
+import { Button } from '../../components/base/Button';
+import { Toast } from '../../components/feedback/Toast';
 import { GradientBackground } from '../../components/GradientBackground';
 import { ProfileRequiredModal } from '../../components/ProfileRequiredModal';
 import { Colors } from '../../constants/Colors';
-import { api, Cart } from '../../services/api';
+import { DesignTokens } from '../../constants/designTokens';
 import { useAuth } from '../../contexts/AuthContext';
+import { api, Cart } from '../../services/api';
 
 export default function CheckoutScreen() {
     const { storeId } = useLocalSearchParams<{ storeId: string }>();
@@ -26,6 +34,9 @@ export default function CheckoutScreen() {
     const [processing, setProcessing] = useState(false);
     const [pixCode, setPixCode] = useState<string | null>(null);
     const [showProfileModal, setShowProfileModal] = useState(false);
+    const [showToast, setShowToast] = useState(false);
+    const [toastMessage, setToastMessage] = useState('');
+    const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
 
     useEffect(() => {
         if (!isProfileComplete) {
@@ -52,6 +63,7 @@ export default function CheckoutScreen() {
             return;
         }
 
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         setProcessing(true);
         try {
             // Create order
@@ -60,9 +72,14 @@ export default function CheckoutScreen() {
             // Get PIX code
             const payment = await api.checkout(order.id);
             setPixCode(payment.pix_code);
+            
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         } catch (error: any) {
             console.error('Error processing checkout:', error);
-            Alert.alert('Erro', error.message || 'Não foi possível processar o pagamento.');
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            setToastMessage(error.message || 'Não foi possível processar o pagamento.');
+            setToastType('error');
+            setShowToast(true);
         } finally {
             setProcessing(false);
         }
@@ -71,7 +88,10 @@ export default function CheckoutScreen() {
     const handleCopyPix = () => {
         if (pixCode) {
             Clipboard.setString(pixCode);
-            Alert.alert('✅ Copiado!', 'O código PIX foi copiado para a área de transferência.');
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            setToastMessage('Código PIX copiado!');
+            setToastType('success');
+            setShowToast(true);
         }
     };
 
@@ -122,46 +142,11 @@ export default function CheckoutScreen() {
                 <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
                     {pixCode ? (
                         // PIX Generated
-                        <View style={styles.pixContainer}>
-                            <View style={styles.pixSuccessIcon}>
-                                <Ionicons name="checkmark-circle" size={64} color={Colors.success} />
-                            </View>
-                            <Text style={styles.pixTitle}>PIX Gerado com Sucesso!</Text>
-                            <Text style={styles.pixSubtitle}>
-                                Copie o código abaixo e pague no app do seu banco
-                            </Text>
-
-                            <View style={styles.pixCodeBox}>
-                                <Text style={styles.pixCode} numberOfLines={3}>{pixCode}</Text>
-                            </View>
-
-                            <TouchableOpacity
-                                style={styles.copyButton}
-                                onPress={handleCopyPix}
-                            >
-                                <LinearGradient
-                                    colors={[Colors.primary, Colors.primaryDark]}
-                                    style={styles.copyButtonGradient}
-                                >
-                                    <Ionicons name="copy" size={20} color={Colors.text} />
-                                    <Text style={styles.copyButtonText}>Copiar Código PIX</Text>
-                                </LinearGradient>
-                            </TouchableOpacity>
-
-                            <View style={styles.timerBox}>
-                                <Ionicons name="time" size={20} color={Colors.warning} />
-                                <Text style={styles.timerText}>
-                                    Após o pagamento, você terá 2 horas para retirada
-                                </Text>
-                            </View>
-
-                            <TouchableOpacity
-                                style={styles.ordersButton}
-                                onPress={() => router.push('/(customer)/orders')}
-                            >
-                                <Text style={styles.ordersButtonText}>Ver Meus Pedidos</Text>
-                            </TouchableOpacity>
-                        </View>
+                        <PixSuccessView
+                            pixCode={pixCode}
+                            onCopy={handleCopyPix}
+                            onViewOrders={() => router.push('/(customer)/orders')}
+                        />
                     ) : (
                         // Order Summary
                         <>
@@ -221,31 +206,98 @@ export default function CheckoutScreen() {
                             <Text style={styles.bottomTotalLabel}>Total</Text>
                             <Text style={styles.bottomTotalValue}>R$ {total.toFixed(2)}</Text>
                         </View>
-                        <TouchableOpacity
-                            style={styles.payButton}
+                        <Button
+                            title="Gerar PIX"
                             onPress={handleCheckout}
-                            disabled={processing}
-                        >
-                            <LinearGradient
-                                colors={[Colors.gradientStart, Colors.gradientEnd]}
-                                style={styles.payButtonGradient}
-                            >
-                                {processing ? (
-                                    <ActivityIndicator color={Colors.text} />
-                                ) : (
-                                    <>
-                                        <Ionicons name="card" size={20} color={Colors.text} />
-                                        <Text style={styles.payButtonText}>Gerar PIX</Text>
-                                    </>
-                                )}
-                            </LinearGradient>
-                        </TouchableOpacity>
+                            variant="primary"
+                            size="lg"
+                            loading={processing}
+                            leftIcon={!processing ? <Ionicons name="card" size={20} color={Colors.text} /> : undefined}
+                            fullWidth
+                            hapticFeedback
+                            accessibilityLabel={`Gerar código PIX para pagamento de R$ ${total.toFixed(2)}`}
+                        />
                     </View>
                 )}
             </View>
+
+            {/* Toast */}
+            <Toast
+                message={toastMessage}
+                type={toastType}
+                visible={showToast}
+                onHide={() => setShowToast(false)}
+                duration={3000}
+            />
         </GradientBackground>
     );
 }
+
+// Componente para o estado de sucesso do PIX
+const PixSuccessView: React.FC<{
+    pixCode: string;
+    onCopy: () => void;
+    onViewOrders: () => void;
+}> = ({ pixCode, onCopy, onViewOrders }) => {
+    const scale = useSharedValue(0);
+    const opacity = useSharedValue(0);
+
+    useEffect(() => {
+        scale.value = withSpring(1, { damping: 15, stiffness: 150 });
+        opacity.value = withTiming(1, { duration: DesignTokens.animations.normal });
+    }, []);
+
+    const animatedIconStyle = useAnimatedStyle(() => ({
+        transform: [{ scale: scale.value }],
+        opacity: opacity.value,
+    }));
+
+    return (
+        <Animated.View style={[styles.pixContainer, { opacity: opacity.value }]}>
+            <Animated.View style={animatedIconStyle}>
+                <View style={styles.pixSuccessIcon}>
+                    <Ionicons name="checkmark-circle" size={64} color={Colors.success} />
+                </View>
+            </Animated.View>
+            <Text style={styles.pixTitle}>PIX Gerado com Sucesso!</Text>
+            <Text style={styles.pixSubtitle}>
+                Copie o código abaixo e pague no app do seu banco
+            </Text>
+
+            <View style={styles.pixCodeBox}>
+                <Text style={styles.pixCode} numberOfLines={3} selectable>{pixCode}</Text>
+            </View>
+
+            <Button
+                title="Copiar Código PIX"
+                onPress={onCopy}
+                variant="primary"
+                size="lg"
+                leftIcon={<Ionicons name="copy" size={20} color={Colors.text} />}
+                fullWidth
+                hapticFeedback
+                style={styles.copyButton}
+                accessibilityLabel="Copiar código PIX"
+                accessibilityHint="Copia o código PIX para área de transferência"
+            />
+
+            <View style={styles.timerBox}>
+                <Ionicons name="time" size={20} color={Colors.warning} />
+                <Text style={styles.timerText}>
+                    Após o pagamento, você terá 2 horas para retirada
+                </Text>
+            </View>
+
+            <Button
+                title="Ver Meus Pedidos"
+                onPress={onViewOrders}
+                variant="secondary"
+                size="md"
+                fullWidth
+            />
+        </Animated.View>
+    );
+};
 
 const styles = StyleSheet.create({
     container: {
@@ -265,9 +317,9 @@ const styles = StyleSheet.create({
         marginBottom: 24,
     },
     backButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 14,
+        width: DesignTokens.touchTargets.min,
+        height: DesignTokens.touchTargets.min,
+        borderRadius: DesignTokens.borderRadius.lg,
         backgroundColor: Colors.glass,
         borderWidth: 1,
         borderColor: Colors.glassBorder,
@@ -284,18 +336,18 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
     },
     sectionTitle: {
-        fontSize: 16,
-        fontWeight: '700',
+        ...DesignTokens.typography.h3,
         color: Colors.text,
-        marginBottom: 16,
+        marginBottom: DesignTokens.spacing.md,
     },
     itemsCard: {
         backgroundColor: Colors.backgroundCard,
-        borderRadius: 16,
+        borderRadius: DesignTokens.borderRadius.lg,
         borderWidth: 1,
         borderColor: Colors.glassBorder,
-        padding: 16,
-        marginBottom: 24,
+        padding: DesignTokens.spacing.md,
+        marginBottom: DesignTokens.spacing.lg,
+        ...DesignTokens.shadows.sm,
     },
     itemRow: {
         flexDirection: 'row',
@@ -410,20 +462,6 @@ const styles = StyleSheet.create({
     },
     payButton: {
         flex: 1,
-        borderRadius: 12,
-        overflow: 'hidden',
-    },
-    payButtonGradient: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 16,
-        gap: 8,
-    },
-    payButtonText: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: Colors.text,
     },
     // PIX Success
     pixContainer: {
@@ -448,11 +486,12 @@ const styles = StyleSheet.create({
     pixCodeBox: {
         width: '100%',
         backgroundColor: Colors.glass,
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 16,
-        borderWidth: 1,
-        borderColor: Colors.glassBorder,
+        borderRadius: DesignTokens.borderRadius.md,
+        padding: DesignTokens.spacing.md,
+        marginBottom: DesignTokens.spacing.md,
+        borderWidth: 2,
+        borderColor: Colors.primary,
+        borderStyle: 'dashed',
     },
     pixCode: {
         fontSize: 12,
@@ -461,22 +500,7 @@ const styles = StyleSheet.create({
         lineHeight: 18,
     },
     copyButton: {
-        width: '100%',
-        borderRadius: 12,
-        overflow: 'hidden',
-        marginBottom: 24,
-    },
-    copyButtonGradient: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 16,
-        gap: 8,
-    },
-    copyButtonText: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: Colors.text,
+        marginBottom: DesignTokens.spacing.lg,
     },
     timerBox: {
         flexDirection: 'row',

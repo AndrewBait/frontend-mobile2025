@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import {
@@ -12,8 +13,18 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import Animated, {
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring,
+    withTiming,
+} from 'react-native-reanimated';
+import { Badge } from '../../components/base/Badge';
+import { Button } from '../../components/base/Button';
+import { EmptyState } from '../../components/feedback/EmptyState';
 import { GradientBackground } from '../../components/GradientBackground';
 import { Colors } from '../../constants/Colors';
+import { DesignTokens } from '../../constants/designTokens';
 import { useCart } from '../../contexts/CartContext';
 import { api, Batch } from '../../services/api';
 
@@ -59,15 +70,19 @@ export default function FavoritesScreen() {
     };
 
     const handleRemoveFavorite = async (id: string) => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         try {
             await api.removeFavorite(id);
             setFavorites(prev => prev.filter(f => f.id !== id));
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         } catch (error) {
             console.error('Error removing favorite:', error);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         }
     };
 
     const handleAddToCart = async (batch: Batch) => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         // ATUALIZAÇÃO OTIMISTA: Atualizar badge imediatamente
         incrementCartCount(1);
         
@@ -77,6 +92,7 @@ export default function FavoritesScreen() {
             // Usar resposta diretamente para atualizar cache (evita requisição extra)
             updateCartCache(result);
             
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             Alert.alert(
                 '✅ Adicionado!',
                 'Produto adicionado ao carrinho.',
@@ -159,7 +175,24 @@ export default function FavoritesScreen() {
         }
     };
 
-    const renderFavorite = ({ item }: { item: Batch }) => {
+    // Componente separado para poder usar hooks
+    const FavoriteItem: React.FC<{ item: Batch; index: number; onAddToCart: (batch: Batch) => void; onRemove: (id: string) => void }> = ({ item, index, onAddToCart, onRemove }) => {
+        const opacity = useSharedValue(0);
+        const translateX = useSharedValue(-20);
+
+        React.useEffect(() => {
+            const delay = index * 50;
+            setTimeout(() => {
+                opacity.value = withTiming(1, { duration: DesignTokens.animations.normal });
+                translateX.value = withSpring(0, { damping: 15, stiffness: 150 });
+            }, delay);
+        }, [index, opacity, translateX]);
+
+        const animatedStyle = useAnimatedStyle(() => ({
+            opacity: opacity.value,
+            transform: [{ translateX: translateX.value }],
+        }));
+
         // Handle both frontend format and backend format (Portuguese/plural)
         const productData = (item as any).products || item.product;
         const productName = productData?.nome || productData?.name || 'Produto';
@@ -172,11 +205,14 @@ export default function FavoritesScreen() {
         const discountPercent = item.discount_percent ?? item.desconto_percentual ?? 0;
 
         return (
-            <TouchableOpacity
-                style={styles.productCard}
-                onPress={() => router.push(`/product/${item.id}`)}
-                activeOpacity={0.9}
-            >
+            <Animated.View style={animatedStyle}>
+                <TouchableOpacity
+                    style={styles.productCard}
+                    onPress={() => router.push(`/product/${item.id}`)}
+                    activeOpacity={0.9}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Ver detalhes de ${productName}`}
+                >
                 {productPhoto ? (
                     <Image
                         source={{ uri: productPhoto }}
@@ -205,36 +241,55 @@ export default function FavoritesScreen() {
                             R$ {promoPrice.toFixed(2).replace('.', ',')}
                         </Text>
                         {discountPercent > 0 && (
-                            <View style={styles.discountBadge}>
-                                <Text style={styles.discountText}>-{Math.round(discountPercent)}%</Text>
-                            </View>
+                            <Badge
+                                label={`-${Math.round(discountPercent)}%`}
+                                variant="error"
+                                size="sm"
+                            />
                         )}
                     </View>
 
                     <View style={styles.actionsRow}>
-                        <TouchableOpacity
-                            style={styles.addButton}
-                            onPress={(e) => {
-                                e.stopPropagation();
-                                handleAddToCart(item);
+                        <Button
+                            title="Adicionar"
+                            onPress={(e: any) => {
+                                e?.stopPropagation();
+                                onAddToCart(item);
                             }}
-                        >
-                            <Ionicons name="cart" size={16} color={Colors.text} />
-                            <Text style={styles.addButtonText}>Adicionar</Text>
-                        </TouchableOpacity>
+                            variant="primary"
+                            size="sm"
+                            leftIcon={<Ionicons name="cart" size={16} color={Colors.text} />}
+                            style={styles.addButton}
+                            hapticFeedback
+                        />
 
                         <TouchableOpacity
                             style={styles.removeButton}
                             onPress={(e) => {
                                 e.stopPropagation();
-                                handleRemoveFavorite(item.id);
+                                onRemove(item.id);
                             }}
+                            accessibilityRole="button"
+                            accessibilityLabel="Remover dos favoritos"
+                            accessibilityHint={`Remove ${productName} da lista de favoritos`}
                         >
                             <Ionicons name="heart-dislike" size={18} color={Colors.error} />
                         </TouchableOpacity>
                     </View>
                 </View>
             </TouchableOpacity>
+            </Animated.View>
+        );
+    };
+
+    const renderFavorite = ({ item, index }: { item: Batch; index: number }) => {
+        return (
+            <FavoriteItem
+                item={item}
+                index={index}
+                onAddToCart={handleAddToCart}
+                onRemove={handleRemoveFavorite}
+            />
         );
     };
 
@@ -258,21 +313,13 @@ export default function FavoritesScreen() {
                 </View>
 
                 {favorites.length === 0 ? (
-                    <View style={styles.emptyContainer}>
-                        <View style={styles.emptyIcon}>
-                            <Ionicons name="heart-outline" size={64} color={Colors.textMuted} />
-                        </View>
-                        <Text style={styles.emptyText}>Nenhum favorito ainda</Text>
-                        <Text style={styles.emptySubtext}>
-                            Adicione produtos aos favoritos para encontrá-los rapidamente
-                        </Text>
-                        <TouchableOpacity
-                            style={styles.exploreButton}
-                            onPress={() => router.push('/(customer)')}
-                        >
-                            <Text style={styles.exploreButtonText}>Explorar Vitrine</Text>
-                        </TouchableOpacity>
-                    </View>
+                    <EmptyState
+                        icon="heart-outline"
+                        title="Nenhum favorito ainda"
+                        message="Adicione produtos aos favoritos para encontrá-los rapidamente"
+                        actionLabel="Explorar Vitrine"
+                        onAction={() => router.push('/(customer)')}
+                    />
                 ) : (
                     <FlatList
                         data={favorites}
@@ -287,6 +334,10 @@ export default function FavoritesScreen() {
                                 tintColor={Colors.primary}
                             />
                         }
+                        removeClippedSubviews={true}
+                        maxToRenderPerBatch={10}
+                        windowSize={10}
+                        initialNumToRender={5}
                     />
                 )}
             </View>
@@ -309,13 +360,12 @@ const styles = StyleSheet.create({
         marginBottom: 24,
     },
     title: {
-        fontSize: 28,
-        fontWeight: '700',
+        ...DesignTokens.typography.h1,
         color: Colors.text,
-        marginBottom: 4,
+        marginBottom: DesignTokens.spacing.xs,
     },
     subtitle: {
-        fontSize: 14,
+        ...DesignTokens.typography.small,
         color: Colors.textSecondary,
     },
     listContent: {
@@ -325,11 +375,12 @@ const styles = StyleSheet.create({
     productCard: {
         flexDirection: 'row',
         backgroundColor: Colors.backgroundCard,
-        borderRadius: 16,
+        borderRadius: DesignTokens.borderRadius.lg,
         borderWidth: 1,
         borderColor: Colors.glassBorder,
         overflow: 'hidden',
-        marginBottom: 12,
+        marginBottom: DesignTokens.spacing.md,
+        ...DesignTokens.shadows.sm,
     },
     productImage: {
         width: 100,
@@ -389,63 +440,15 @@ const styles = StyleSheet.create({
     },
     addButton: {
         flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: Colors.primary,
-        borderRadius: 8,
-        paddingVertical: 8,
-        gap: 6,
-    },
-    addButtonText: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: Colors.text,
     },
     removeButton: {
-        width: 36,
-        height: 36,
-        borderRadius: 8,
-        backgroundColor: Colors.error + '20',
+        minWidth: DesignTokens.touchTargets.min,
+        minHeight: DesignTokens.touchTargets.min,
+        width: DesignTokens.touchTargets.min,
+        height: DesignTokens.touchTargets.min,
+        borderRadius: DesignTokens.borderRadius.sm,
+        backgroundColor: Colors.error15,
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    emptyContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 48,
-    },
-    emptyIcon: {
-        width: 120,
-        height: 120,
-        borderRadius: 60,
-        backgroundColor: Colors.glass,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 24,
-    },
-    emptyText: {
-        fontSize: 20,
-        fontWeight: '600',
-        color: Colors.text,
-        marginBottom: 8,
-    },
-    emptySubtext: {
-        fontSize: 14,
-        color: Colors.textSecondary,
-        textAlign: 'center',
-        marginBottom: 24,
-    },
-    exploreButton: {
-        paddingVertical: 14,
-        paddingHorizontal: 32,
-        borderRadius: 12,
-        backgroundColor: Colors.primary,
-    },
-    exploreButtonText: {
-        fontSize: 15,
-        fontWeight: '600',
-        color: Colors.text,
     },
 });

@@ -1,18 +1,27 @@
-import React, { useState, useCallback } from 'react';
-import {
-    StyleSheet,
-    View,
-    Text,
-    FlatList,
-    TouchableOpacity,
-    ActivityIndicator,
-    RefreshControl,
-} from 'react-native';
-import { router } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+import { router } from 'expo-router';
+import React, { useCallback, useState } from 'react';
+import {
+    ActivityIndicator,
+    FlatList,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import Animated, {
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring,
+    withTiming,
+} from 'react-native-reanimated';
+import { Badge } from '../../components/base/Badge';
+import { EmptyState } from '../../components/feedback/EmptyState';
 import { GradientBackground } from '../../components/GradientBackground';
 import { Colors } from '../../constants/Colors';
+import { DesignTokens } from '../../constants/designTokens';
 import { api, Order } from '../../services/api';
 
 export default function OrdersScreen() {
@@ -57,65 +66,91 @@ export default function OrdersScreen() {
 
     const getStatusInfo = (status: string) => {
         switch (status) {
+            case 'pending_payment':
             case 'pending':
-                return { label: 'Aguardando Pagamento', color: Colors.warning, icon: 'time' as const };
+                return { label: 'Aguardando Pagamento', variant: 'warning' as const, icon: 'time' as const };
             case 'paid':
-                return { label: 'Pago - Retirar', color: Colors.success, icon: 'checkmark-circle' as const };
+                return { label: 'Pago - Retirar', variant: 'success' as const, icon: 'checkmark-circle' as const };
             case 'picked_up':
-                return { label: 'Retirado', color: Colors.primary, icon: 'bag-check' as const };
+                return { label: 'Retirado', variant: 'primary' as const, icon: 'bag-check' as const };
             case 'cancelled':
-                return { label: 'Cancelado', color: Colors.error, icon: 'close-circle' as const };
+                return { label: 'Cancelado', variant: 'error' as const, icon: 'close-circle' as const };
             case 'expired':
-                return { label: 'Expirado', color: Colors.textMuted, icon: 'alert-circle' as const };
+                return { label: 'Expirado', variant: 'default' as const, icon: 'alert-circle' as const };
             default:
-                return { label: 'Desconhecido', color: Colors.textMuted, icon: 'help-circle' as const };
+                return { label: 'Desconhecido', variant: 'default' as const, icon: 'help-circle' as const };
         }
     };
 
-    const renderOrder = ({ item }: { item: Order }) => {
+    // Componente separado para poder usar hooks
+    const OrderItem: React.FC<{ item: Order; index: number }> = ({ item, index }) => {
         const statusInfo = getStatusInfo(item.status);
+        const opacity = useSharedValue(0);
+        const translateY = useSharedValue(20);
+
+        React.useEffect(() => {
+            const delay = index * 50;
+            setTimeout(() => {
+                opacity.value = withTiming(1, { duration: DesignTokens.animations.normal });
+                translateY.value = withSpring(0, { damping: 15, stiffness: 150 });
+            }, delay);
+        }, [index, opacity, translateY]);
+
+        const animatedStyle = useAnimatedStyle(() => ({
+            opacity: opacity.value,
+            transform: [{ translateY: translateY.value }],
+        }));
 
         return (
-            <TouchableOpacity
-                style={styles.orderCard}
-                onPress={() => router.push(`/order/${item.id}`)}
-                activeOpacity={0.9}
-            >
-                <View style={styles.orderHeader}>
-                    <View>
-                        <Text style={styles.orderNumber}>Pedido #{item.id.slice(-6).toUpperCase()}</Text>
-                        <Text style={styles.orderDate}>
-                            {new Date(item.created_at || '').toLocaleDateString('pt-BR')}
-                        </Text>
-                    </View>
-                    <View style={[styles.statusBadge, { backgroundColor: statusInfo.color + '20' }]}>
-                        <Ionicons name={statusInfo.icon} size={14} color={statusInfo.color} />
-                        <Text style={[styles.statusText, { color: statusInfo.color }]}>
-                            {statusInfo.label}
-                        </Text>
-                    </View>
-                </View>
-
-                <View style={styles.orderBody}>
-                    <View style={styles.storeRow}>
-                        <Ionicons name="storefront" size={16} color={Colors.textMuted} />
-                        <Text style={styles.storeName}>{item.store?.name || 'Loja'}</Text>
+            <Animated.View style={animatedStyle}>
+                <TouchableOpacity
+                    style={styles.orderCard}
+                    onPress={() => router.push(`/order/${item.id}`)}
+                    activeOpacity={0.9}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Pedido ${item.id.slice(-6).toUpperCase()}, ${statusInfo.label}`}
+                    accessibilityHint="Toque para ver detalhes do pedido"
+                >
+                    <View style={styles.orderHeader}>
+                        <View>
+                            <Text style={styles.orderNumber}>Pedido #{item.id.slice(-6).toUpperCase()}</Text>
+                            <Text style={styles.orderDate}>
+                                {new Date(item.created_at || '').toLocaleDateString('pt-BR')}
+                            </Text>
+                        </View>
+                        <Badge
+                            label={statusInfo.label}
+                            variant={statusInfo.variant}
+                            size="sm"
+                            icon={statusInfo.icon}
+                        />
                     </View>
 
-                    <View style={styles.totalRow}>
-                        <Text style={styles.totalLabel}>Total</Text>
-                        <Text style={styles.totalValue}>R$ {item.total_amount.toFixed(2)}</Text>
-                    </View>
-                </View>
+                    <View style={styles.orderBody}>
+                        <View style={styles.storeRow}>
+                            <Ionicons name="storefront" size={16} color={Colors.textMuted} />
+                            <Text style={styles.storeName}>{item.store?.name || 'Loja'}</Text>
+                        </View>
 
-                {item.status === 'paid' && item.pickup_code && (
-                    <View style={styles.pickupCodeContainer}>
-                        <Text style={styles.pickupCodeLabel}>Código de Retirada</Text>
-                        <Text style={styles.pickupCode}>{item.pickup_code}</Text>
+                        <View style={styles.totalRow}>
+                            <Text style={styles.totalLabel}>Total</Text>
+                            <Text style={styles.totalValue}>R$ {item.total_amount.toFixed(2).replace('.', ',')}</Text>
+                        </View>
                     </View>
+
+                    {item.status === 'paid' && item.pickup_code && (
+                        <View style={styles.pickupCodeContainer}>
+                            <Text style={styles.pickupCodeLabel}>Código de Retirada</Text>
+                            <Text style={styles.pickupCode}>{item.pickup_code}</Text>
+                        </View>
                 )}
             </TouchableOpacity>
+        </Animated.View>
         );
+    };
+
+    const renderOrder = ({ item, index }: { item: Order; index: number }) => {
+        return <OrderItem item={item} index={index} />;
     };
 
     if (loading) {
@@ -138,21 +173,13 @@ export default function OrdersScreen() {
                 </View>
 
                 {orders.length === 0 ? (
-                    <View style={styles.emptyContainer}>
-                        <View style={styles.emptyIcon}>
-                            <Ionicons name="receipt-outline" size={64} color={Colors.textMuted} />
-                        </View>
-                        <Text style={styles.emptyText}>Nenhum pedido ainda</Text>
-                        <Text style={styles.emptySubtext}>
-                            Comece a comprar produtos com desconto!
-                        </Text>
-                        <TouchableOpacity
-                            style={styles.exploreButton}
-                            onPress={() => router.push('/(customer)')}
-                        >
-                            <Text style={styles.exploreButtonText}>Explorar Vitrine</Text>
-                        </TouchableOpacity>
-                    </View>
+                    <EmptyState
+                        icon="receipt-outline"
+                        title="Nenhum pedido ainda"
+                        message="Comece a comprar produtos com desconto!"
+                        actionLabel="Explorar Vitrine"
+                        onAction={() => router.push('/(customer)')}
+                    />
                 ) : (
                     <FlatList
                         data={orders}
@@ -167,6 +194,10 @@ export default function OrdersScreen() {
                                 tintColor={Colors.primary}
                             />
                         }
+                        removeClippedSubviews={true}
+                        maxToRenderPerBatch={10}
+                        windowSize={10}
+                        initialNumToRender={5}
                     />
                 )}
             </View>
@@ -189,13 +220,12 @@ const styles = StyleSheet.create({
         marginBottom: 24,
     },
     title: {
-        fontSize: 28,
-        fontWeight: '700',
+        ...DesignTokens.typography.h1,
         color: Colors.text,
-        marginBottom: 4,
+        marginBottom: DesignTokens.spacing.xs,
     },
     subtitle: {
-        fontSize: 14,
+        ...DesignTokens.typography.small,
         color: Colors.textSecondary,
     },
     listContent: {
@@ -204,11 +234,12 @@ const styles = StyleSheet.create({
     },
     orderCard: {
         backgroundColor: Colors.backgroundCard,
-        borderRadius: 16,
+        borderRadius: DesignTokens.borderRadius.lg,
         borderWidth: 1,
         borderColor: Colors.glassBorder,
-        padding: 16,
-        marginBottom: 12,
+        padding: DesignTokens.spacing.md,
+        marginBottom: DesignTokens.spacing.md,
+        ...DesignTokens.shadows.sm,
     },
     orderHeader: {
         flexDirection: 'row',
@@ -225,18 +256,6 @@ const styles = StyleSheet.create({
     orderDate: {
         fontSize: 12,
         color: Colors.textMuted,
-    },
-    statusBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 8,
-        gap: 6,
-    },
-    statusText: {
-        fontSize: 12,
-        fontWeight: '600',
     },
     orderBody: {
         gap: 12,
@@ -268,59 +287,24 @@ const styles = StyleSheet.create({
         color: Colors.text,
     },
     pickupCodeContainer: {
-        marginTop: 16,
-        backgroundColor: Colors.success + '15',
-        borderRadius: 12,
-        padding: 16,
+        marginTop: DesignTokens.spacing.md,
+        backgroundColor: Colors.success15,
+        borderRadius: DesignTokens.borderRadius.md,
+        padding: DesignTokens.spacing.md,
         alignItems: 'center',
+        borderWidth: 1,
+        borderColor: Colors.success,
     },
     pickupCodeLabel: {
-        fontSize: 12,
+        ...DesignTokens.typography.captionBold,
         color: Colors.success,
-        marginBottom: 8,
+        marginBottom: DesignTokens.spacing.sm,
     },
     pickupCode: {
         fontSize: 28,
         fontWeight: '800',
         color: Colors.success,
         letterSpacing: 4,
-    },
-    emptyContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 48,
-    },
-    emptyIcon: {
-        width: 120,
-        height: 120,
-        borderRadius: 60,
-        backgroundColor: Colors.glass,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 24,
-    },
-    emptyText: {
-        fontSize: 20,
-        fontWeight: '600',
-        color: Colors.text,
-        marginBottom: 8,
-    },
-    emptySubtext: {
-        fontSize: 14,
-        color: Colors.textSecondary,
-        textAlign: 'center',
-        marginBottom: 24,
-    },
-    exploreButton: {
-        paddingVertical: 14,
-        paddingHorizontal: 32,
-        borderRadius: 12,
-        backgroundColor: Colors.primary,
-    },
-    exploreButtonText: {
-        fontSize: 15,
-        fontWeight: '600',
-        color: Colors.text,
+        fontFamily: 'monospace',
     },
 });
