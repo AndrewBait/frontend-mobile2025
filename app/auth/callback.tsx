@@ -4,6 +4,7 @@ import React, { useEffect, useRef } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { GradientBackground } from '../../components/GradientBackground';
 import { Colors } from '../../constants/Colors';
+import { API_BASE_URL } from '../../constants/config';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
 import { getGlobalRedirectInProgress, setGlobalRedirectInProgress } from '../../utils/redirectLock';
@@ -310,7 +311,7 @@ export default function AuthCallbackScreen() {
             
             if (isTimeout) {
                 console.error('[AuthCallback] ⚠️ TIMEOUT: Backend não está respondendo!');
-                console.error('[AuthCallback] Verifique se o backend está rodando em:', 'http://192.168.10.9:3000');
+                console.error('[AuthCallback] Verifique se o backend está rodando em:', API_BASE_URL);
                 console.log('[AuthCallback] Redirecionando para seleção de role devido ao timeout');
                 router.replace('/select-role');
             } else if (isInternalServerError) {

@@ -159,20 +159,29 @@ export default function CustomerLayout() {
                 }}
             />
             <Tabs.Screen
-                name="cart"
-                options={{
-                    title: 'Carrinho',
-                    tabBarIcon: ({ color, size }) => (
-                        <Ionicons name="cart" size={size} color={color} />
-                    ),
-                }}
-            />
-            <Tabs.Screen
                 name="favorites"
                 options={{
                     title: 'Favoritos',
                     tabBarIcon: ({ color, size }) => (
                         <Ionicons name="heart" size={size} color={color} />
+                    ),
+                }}
+            />
+            <Tabs.Screen
+                name="store-products"
+                options={{
+                    title: 'Lojas',
+                    tabBarIcon: ({ color, size }) => (
+                        <Ionicons name="business" size={size} color={color} />
+                    ),
+                }}
+            />
+            <Tabs.Screen
+                name="cart"
+                options={{
+                    title: 'Carrinho',
+                    tabBarIcon: ({ color, size }) => (
+                        <Ionicons name="cart" size={size} color={color} />
                     ),
                 }}
             />

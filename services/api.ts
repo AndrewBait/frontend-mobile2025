@@ -117,6 +117,9 @@ export interface OrderItem {
 
 // API Client
 class ApiClient {
+    private networkErrorCount: Map<string, number> = new Map();
+    private lastNetworkErrorTime: Map<string, number> = new Map();
+
     private async request<T>(
         endpoint: string,
         options: RequestInit = {}
@@ -129,44 +132,183 @@ class ApiClient {
             ...options.headers,
         };
 
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-            ...options,
-            headers,
-        });
-
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new Error(error.message || `API Error: ${response.status}`);
-        }
-
-        // Check if response has content before parsing JSON
-        const contentType = response.headers.get('content-type');
-        const text = await response.text();
+        const fullUrl = `${API_BASE_URL}${endpoint}`;
+        const errorKey = `${endpoint}-${options.method || 'GET'}`;
+        const now = Date.now();
         
-        // If response is empty, return empty object/array based on endpoint
-        if (!text || text.trim() === '') {
-            // For cart endpoint, return empty cart structure
-            if (endpoint.includes('/cart')) {
-                return { items: [], total: 0 } as T;
-            }
-            // For other endpoints, return empty object
-            return {} as T;
-        }
+        // Check if we should suppress logs due to repeated network errors
+        const lastErrorTime = this.lastNetworkErrorTime.get(errorKey) || 0;
+        const errorCount = this.networkErrorCount.get(errorKey) || 0;
+        const timeSinceLastError = now - lastErrorTime;
+        
+        // Only log if it's been more than 5 seconds since last error or if error count is low
+        const shouldLog = timeSinceLastError > 5000 || errorCount < 3;
 
-        // Try to parse JSON, but handle parse errors gracefully
+        if (shouldLog) {
+            console.log('[API] Fazendo requisição:', {
+                method: options.method || 'GET',
+                endpoint: fullUrl,
+                hasToken: !!token
+            });
+        }
+        
+        const startTime = Date.now();
+        
         try {
-            return JSON.parse(text) as T;
-        } catch (parseError) {
-            console.error(`[API] JSON parse error for ${endpoint}:`, parseError);
-            console.error(`[API] Response text:`, text.substring(0, 200));
+            const response = await fetch(fullUrl, {
+                ...options,
+                headers,
+            });
             
-            // For cart endpoint, return empty cart on parse error
-            if (endpoint.includes('/cart')) {
-                return { items: [], total: 0 } as T;
+            // Reset error count on success
+            if (errorCount > 0) {
+                this.networkErrorCount.delete(errorKey);
+                this.lastNetworkErrorTime.delete(errorKey);
             }
             
-            // Re-throw with more context
-            throw new Error(`Failed to parse response from ${endpoint}: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+            const duration = Date.now() - startTime;
+            
+            if (shouldLog || response.ok) {
+                console.log('[API] Resposta recebida:', {
+                    status: response.status,
+                    statusText: response.statusText,
+                    duration: `${duration}ms`,
+                    endpoint
+                });
+            }
+
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({}));
+                const statusCode = response.status;
+                
+                // Erros esperados (409 Conflict, 400 Bad Request, 403 Forbidden para role/permissões)
+                // 403 é esperado quando usuário não tem permissão (ex: store_owner tentando acessar /me/cart)
+                const isCartEndpoint = endpoint.includes('/cart');
+                const isForbiddenRole = statusCode === 403 && (
+                    error.message?.includes('Insufficient role') || 
+                    error.message?.includes('Role not found') ||
+                    isCartEndpoint
+                );
+                const isExpectedError = statusCode === 409 || statusCode === 400 || isForbiddenRole;
+                
+                if (isExpectedError) {
+                    // Log silencioso para erros esperados (não logar como ERROR)
+                    if (shouldLog && !isForbiddenRole) {
+                        // Apenas logar erros esperados que não sejam 403 de role (para não poluir logs)
+                        console.log('[API] Erro esperado na resposta:', {
+                            status: statusCode,
+                            statusText: response.statusText,
+                            message: error.message,
+                            endpoint
+                        });
+                    }
+                } else if (shouldLog) {
+                    console.error('[API] Erro na resposta:', {
+                        status: statusCode,
+                        statusText: response.statusText,
+                        error,
+                        endpoint
+                    });
+                }
+                
+                // Criar erro customizado que preserva o status code
+                const apiError: any = new Error(error.message || `API Error: ${statusCode}`);
+                apiError.status = statusCode;
+                apiError.statusCode = statusCode;
+                apiError.response = error;
+                throw apiError;
+            }
+
+            // Check if response has content before parsing JSON
+            const contentType = response.headers.get('content-type');
+            const text = await response.text();
+            
+            // If response is empty, return empty object/array based on endpoint
+            if (!text || text.trim() === '') {
+                // For cart endpoint, return empty cart structure
+                if (endpoint.includes('/cart')) {
+                    return { items: [], total: 0 } as T;
+                }
+                // For other endpoints, return empty object
+                return {} as T;
+            }
+
+            // Try to parse JSON, but handle parse errors gracefully
+            try {
+                return JSON.parse(text) as T;
+            } catch (parseError) {
+                console.error(`[API] JSON parse error for ${endpoint}:`, parseError);
+                console.error(`[API] Response text:`, text.substring(0, 200));
+                
+                // For cart endpoint, return empty cart on parse error
+                if (endpoint.includes('/cart')) {
+                    return { items: [], total: 0 } as T;
+                }
+                
+                // Re-throw with more context
+                throw new Error(`Failed to parse response from ${endpoint}: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+            }
+        } catch (fetchError: any) {
+            // Handle network errors (fetch failures, not HTTP errors)
+            const isNetworkError = fetchError?.message?.includes('Network request failed') || 
+                                 fetchError?.message?.includes('Failed to fetch') ||
+                                 fetchError?.name === 'TypeError' ||
+                                 fetchError?.message?.includes('timeout');
+            
+            if (isNetworkError) {
+                const newErrorCount = errorCount + 1;
+                this.networkErrorCount.set(errorKey, newErrorCount);
+                this.lastNetworkErrorTime.set(errorKey, now);
+                
+                // Only log first few network errors to avoid spam
+                // Para /me/cart e /public/batches, reduzir ainda mais os logs
+                const isCartEndpoint = endpoint.includes('/cart');
+                const isPublicBatches = endpoint.includes('/public/batches');
+                const shouldLogError = shouldLog && (
+                    isCartEndpoint ? newErrorCount === 1 : 
+                    isPublicBatches ? newErrorCount <= 2 : 
+                    newErrorCount <= 3
+                );
+                
+                if (shouldLogError) {
+                    // Log como informação, não como erro, para não poluir o console
+                    console.log('[API] Erro de rede (esperado em conexões instáveis):', {
+                        message: fetchError?.message,
+                        endpoint,
+                        attempt: newErrorCount
+                    });
+                }
+            } else {
+                // Verificar se é um erro HTTP esperado (409, 400, 403 para role/permissões)
+                const isCartEndpoint = endpoint.includes('/cart');
+                const isForbiddenRole = (fetchError?.status === 403 || fetchError?.statusCode === 403) && (
+                    fetchError?.message?.includes('Insufficient role') || 
+                    fetchError?.message?.includes('Role not found') ||
+                    isCartEndpoint
+                );
+                const isExpectedHttpError = fetchError?.status === 409 || fetchError?.statusCode === 409 ||
+                                          fetchError?.status === 400 || fetchError?.statusCode === 400 ||
+                                          isForbiddenRole;
+                
+                if (!isExpectedHttpError) {
+                    // Non-network errors should always be logged (exceto erros esperados)
+                    console.error('[API] Erro na requisição:', {
+                        message: fetchError?.message,
+                        endpoint
+                    });
+                } else {
+                    // Erros esperados já foram logados acima, não logar novamente
+                    // Especialmente 403 de role não deve ser logado
+                    if (!isForbiddenRole) {
+                        console.log('[API] Erro esperado capturado (não logando como ERROR):', {
+                            status: fetchError?.status || fetchError?.statusCode,
+                            endpoint
+                        });
+                    }
+                }
+            }
+            
+            throw fetchError;
         }
     }
 
@@ -264,7 +406,32 @@ class ApiClient {
     }
 
     async getPublicStore(id: string): Promise<Store> {
-        return this.request(`/public/stores/${id}`);
+        const response = await this.request<any>(`/public/stores/${id}`);
+        
+        // Map backend fields (Portuguese) to frontend fields (English)
+        return {
+            id: response.id,
+            merchant_id: response.owner_id,
+            name: response.nome || response.name,
+            cnpj: response.cnpj,
+            type: response.tipo || response.type,
+            address: response.endereco || response.address,
+            city: response.cidade || response.city,
+            state: response.estado || response.state,
+            zip: response.cep || response.zip,
+            phone: response.telefone || response.phone,
+            hours: response.hours || response.horario_funcionamento || 
+                   (response.horario_abertura && response.horario_fechamento 
+                    ? `${response.horario_abertura} - ${response.horario_fechamento}` 
+                    : ''),
+            pickup_deadline: response.horario_limite_retirada || response.pickup_deadline,
+            lat: response.lat,
+            lng: response.lng,
+            logo_url: response.logo_url,
+            is_active: response.active ?? response.is_active ?? true,
+            is_premium: response.is_premium ?? false,
+            created_at: response.created_at,
+        };
     }
 
     async getStoreSummary(id: string): Promise<{
@@ -307,21 +474,45 @@ class ApiClient {
     // ==================== BATCHES ====================
 
     async getStoreBatches(storeId: string): Promise<Batch[]> {
-        return this.request(`/stores/${storeId}/batches`);
+        const batches = await this.request<any[]>(`/stores/${storeId}/batches`);
+        return batches.map((batch: any) => this.mapBatchFields(batch));
     }
 
     async createBatch(storeId: string, data: Partial<Batch>): Promise<Batch> {
-        return this.request(`/stores/${storeId}/batches`, {
+        // Mapear campos do frontend (EN) para backend (PT) antes de enviar
+        const backendData: any = {
+            product_id: data.product_id,
+            expiration_date: data.expiration_date,
+            promo_price: data.promo_price,
+            stock: data.stock ?? data.estoque_total,
+            original_price: data.original_price,
+            discount_percent: data.discount_percent,
+            is_active: data.is_active,
+        };
+        
+        const batch = await this.request<any>(`/stores/${storeId}/batches`, {
             method: 'POST',
-            body: JSON.stringify(data),
+            body: JSON.stringify(backendData),
         });
+        return this.mapBatchFields(batch);
     }
 
     async updateBatch(id: string, data: Partial<Batch>): Promise<Batch> {
-        return this.request(`/batches/${id}`, {
+        // Mapear campos do frontend (EN) para backend (PT) - UpdateBatchDto usa campos PT
+        const backendData: any = {};
+        if (data.product_id !== undefined) backendData.product_id = data.product_id;
+        if (data.expiration_date !== undefined) backendData.data_vencimento = data.expiration_date;
+        if (data.promo_price !== undefined) backendData.preco_promocional = data.promo_price;
+        if (data.stock !== undefined || data.estoque_total !== undefined) {
+            backendData.estoque_total = data.stock ?? data.estoque_total;
+        }
+        if (data.status !== undefined) backendData.status = data.status;
+        
+        const batch = await this.request<any>(`/batches/${id}`, {
             method: 'PUT',
-            body: JSON.stringify(data),
+            body: JSON.stringify(backendData),
         });
+        return this.mapBatchFields(batch);
     }
 
     async getPublicBatches(params: {
@@ -337,11 +528,66 @@ class ApiClient {
         Object.entries(params).forEach(([key, value]) => {
             if (value !== undefined) query.append(key, String(value));
         });
-        return this.request(`/public/batches?${query}`);
+        const batches = await this.request<any[]>(`/public/batches?${query}`);
+        
+        // Mapear campos do backend (português) para frontend (inglês)
+        return batches.map((batch: any) => this.mapBatchFields(batch));
     }
 
     async getPublicBatch(id: string): Promise<Batch> {
-        return this.request(`/public/batches/${id}`);
+        const batch = await this.request<any>(`/public/batches/${id}`);
+        return this.mapBatchFields(batch);
+    }
+
+    // Helper para mapear campos de batch do backend (PT) para frontend (EN)
+    private mapBatchFields(batch: any): Batch {
+        // Backend pode retornar products (plural) ou product (singular)
+        const products = batch.products || batch.product;
+        const stores = batch.stores || batch.store;
+        
+        // Mapear produto com todos os campos possíveis
+        const mappedProduct = products ? {
+            ...products,
+            id: products.id,
+            name: products.nome ?? products.name,
+            photo1: products.foto1 ?? products.photo1,
+            photo2: products.foto2 ?? products.photo2,
+            category: products.categoria ?? products.category,
+            description: products.descricao ?? products.description,
+            preco_normal: products.preco_normal,
+        } : batch.product;
+        
+        // Mapear loja com todos os campos possíveis
+        const mappedStore = stores ? {
+            ...stores,
+            id: stores.id,
+            name: stores.nome ?? stores.name,
+            address: stores.endereco ?? stores.address,
+            logo_url: stores.logo_url,
+            phone: stores.telefone ?? stores.phone,
+            city: stores.cidade ?? stores.city,
+            state: stores.estado ?? stores.state,
+            zip: stores.cep ?? stores.zip,
+            hours: stores.horario_funcionamento ?? stores.hours,
+        } : batch.store;
+        
+        return {
+            ...batch,
+            promo_price: batch.preco_promocional ?? batch.promo_price,
+            original_price: batch.preco_normal_override ?? products?.preco_normal ?? batch.original_price,
+            expiration_date: batch.data_vencimento ?? batch.expiration_date,
+            discount_percent: batch.desconto_percentual ?? batch.discount_percent,
+            stock: batch.estoque_total ?? batch.stock,
+            disponivel: batch.disponivel ?? batch.stock ?? batch.estoque_total ?? 0,
+            estoque_total: batch.estoque_total ?? batch.stock ?? 0,
+            is_active: batch.active ?? batch.is_active ?? batch.status === 'active',
+            status: batch.status,
+            // Manter ambos para compatibilidade
+            product: mappedProduct,
+            products: products, // Manter original também
+            store: mappedStore,
+            stores: stores, // Manter original também
+        };
     }
 
     // ==================== FAVORITES ====================
@@ -366,12 +612,28 @@ class ApiClient {
     // ==================== CART ====================
 
     async getCart(): Promise<Cart> {
-        const response = await this.request<any>('/me/cart');
+        // Log reduzido para evitar spam - apenas em caso de erro ou primeira chamada
+        try {
+            const response = await this.request<any>('/me/cart');
+            // Log detalhado removido para reduzir spam - apenas logar em caso de problemas
+            
+            // Se o backend retornar null (carrinho vazio), retornar estrutura vazia
+            if (!response || response === null) {
+                console.log('[API] getCart: Backend retornou null, retornando carrinho vazio');
+                return { items: [], total: 0 };
+            }
+            
+            // Se o backend retornar um objeto sem items, pode ser que items esteja vazio
+            if (!response.items && response.id) {
+                // É um carrinho mas sem items
+                console.log('[API] getCart: Carrinho sem items');
+                return { items: [], total: 0 };
+            }
         
-        // Map backend fields (Portuguese/plural) to frontend fields (English/singular)
-        // Backend returns: product_batches, products
-        // Frontend expects: batch, batch.product
-        const mappedItems = (response.items || []).map((item: any) => {
+            // Map backend fields (Portuguese/plural) to frontend fields (English/singular)
+            // Backend returns: product_batches, products
+            // Frontend expects: batch, batch.product
+            const mappedItems = (response.items || []).map((item: any) => {
             // Backend structure: item.product_batches, item.product_batches.products
             // Frontend structure: item.batch, item.batch.product
             const productBatches = item.product_batches || item.batch;
@@ -388,6 +650,10 @@ class ApiClient {
                     original_price: productBatches.preco_normal_override || productBatches.original_price,
                     expiration_date: productBatches.data_vencimento || productBatches.expiration_date,
                     store_id: productBatches.store_id,
+                    // Mapear estoque disponível (disponivel é calculado no banco)
+                    stock: productBatches.disponivel ?? productBatches.stock ?? productBatches.estoque_total ?? 0,
+                    disponivel: productBatches.disponivel ?? productBatches.stock ?? productBatches.estoque_total ?? 0,
+                    estoque_total: productBatches.estoque_total ?? productBatches.stock ?? 0,
                     product: products ? {
                         ...products,
                         name: products.nome || products.name,
@@ -396,26 +662,107 @@ class ApiClient {
                     store: productBatches.store,
                 } : item.batch,
             };
+            });
+            
+            const result = {
+                items: mappedItems,
+                total: response.total || 0,
+            };
+            
+            // Log removido para reduzir spam - apenas logar em caso de problemas
+            
+            return result;
+        } catch (error: any) {
+            // Tratar erro 403 (Insufficient role) como esperado - usuário não é customer
+            const isForbidden = error?.status === 403 || error?.statusCode === 403;
+            const isNetworkError = error?.message?.includes('Network request failed') || 
+                                 error?.message?.includes('Failed to fetch');
+            
+            if (isForbidden) {
+                // Usuário não é customer, retornar carrinho vazio sem logar como erro
+                return { items: [], total: 0 };
+            }
+            
+            // Only log cart errors if they're not network failures (already logged in request)
+            if (!isNetworkError) {
+                console.error('[API] getCart erro:', {
+                    message: error?.message,
+                    endpoint: '/me/cart'
+                });
+            }
+            throw error;
+        }
+    }
+
+    async addToCart(batchId: string, quantity: number = 1, replaceCart: boolean = false): Promise<Cart> {
+        console.log('[API] addToCart chamado:', { batchId, quantity, replaceCart });
+        try {
+            // Backend espera batch_id no DTO AddItemDto
+            const result = await this.request<Cart>('/me/cart/add-item', {
+                method: 'POST',
+                body: JSON.stringify({ 
+                    batch_id: batchId, 
+                    quantity,
+                    replace_cart: replaceCart 
+                }),
+            });
+            console.log('[API] addToCart sucesso:', {
+                hasItems: !!result?.items,
+                itemsCount: result?.items?.length || 0,
+                total: result?.total || 0
+            });
+            return result;
+        } catch (error: any) {
+            // Erros esperados (409 Conflict) não devem ser logados como ERROR
+            const isExpectedError = error?.status === 409 || error?.statusCode === 409;
+            
+            if (isExpectedError) {
+                console.log('[API] addToCart erro esperado:', {
+                    message: error?.message,
+                    status: error?.status || error?.statusCode,
+                    endpoint: '/me/cart/add-item',
+                    batchId
+                });
+            } else {
+                console.error('[API] addToCart erro:', {
+                    message: error?.message,
+                    endpoint: '/me/cart/add-item',
+                    batchId,
+                    quantity,
+                    replaceCart
+                });
+            }
+            throw error;
+        }
+    }
+
+    async updateCartItemQuantity(batchId: string, quantity: number): Promise<Cart> {
+        return this.request(`/me/cart/items/${batchId}/quantity`, {
+            method: 'PUT',
+            body: JSON.stringify({ quantity }),
+        });
+    }
+
+    async removeFromCart(batchId: string): Promise<Cart | { cart: null }> {
+        // Backend espera product_batch_id no body
+        // Backend pode retornar { cart: null } se carrinho ficar vazio, ou Cart completo
+        const response = await this.request<any>('/me/cart/remove-item', {
+            method: 'POST',
+            body: JSON.stringify({ product_batch_id: batchId }),
         });
         
-        return {
-            items: mappedItems,
-            total: response.total || 0,
-        };
-    }
-
-    async addToCart(batchId: string, quantity: number = 1): Promise<Cart> {
-        return this.request('/me/cart/add-item', {
-            method: 'POST',
-            body: JSON.stringify({ batch_id: batchId, quantity }),
-        });
-    }
-
-    async removeFromCart(batchId: string): Promise<Cart> {
-        return this.request('/me/cart/remove-item', {
-            method: 'POST',
-            body: JSON.stringify({ batch_id: batchId }),
-        });
+        // Se backend retornou { cart: null }, retornar carrinho vazio
+        if (response && typeof response === 'object' && 'cart' in response) {
+            const cart = (response as any).cart;
+            if (cart === null) {
+                return { items: [], total: 0 };
+            }
+            // Se cart não é null, retornar o cart
+            return cart;
+        }
+        
+        // Se retornou Cart diretamente, retornar como está
+        return response;
     }
 
     async clearCart(): Promise<void> {

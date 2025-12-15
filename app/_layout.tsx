@@ -1,11 +1,13 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from '../contexts/AuthContext';
+import { CartProvider } from '../contexts/CartContext';
 
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <StatusBar style="light" />
+      <CartProvider>
+        <StatusBar style="light" />
       <Stack
         screenOptions={{
           headerShown: false,
@@ -27,6 +29,7 @@ export default function RootLayout() {
         <Stack.Screen name="checkout/[storeId]" />
         <Stack.Screen name="order/[id]" />
       </Stack>
+      </CartProvider>
     </AuthProvider>
   );
 }

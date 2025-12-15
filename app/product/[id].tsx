@@ -15,10 +15,12 @@ import {
 } from 'react-native';
 import { GradientBackground } from '../../components/GradientBackground';
 import { Colors } from '../../constants/Colors';
+import { useCart } from '../../contexts/CartContext';
 import { api, Batch } from '../../services/api';
 
 export default function ProductDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
+    const { incrementCartCount, updateCartCache } = useCart();
     const [batch, setBatch] = useState<Batch | null>(null);
     const [loading, setLoading] = useState(true);
     const [isFavorite, setIsFavorite] = useState(false);
@@ -57,19 +59,119 @@ export default function ProductDetailScreen() {
     };
 
     const handleAddToCart = async () => {
+        // ATUALIZAÇÃO OTIMISTA: Atualizar badge imediatamente
+        incrementCartCount(quantity);
+        
         try {
-            await api.addToCart(id!, quantity);
+            const result = await api.addToCart(id!, quantity);
+            
+            // Usar resposta diretamente para atualizar cache (evita requisição extra)
+            updateCartCache(result);
+            
+            // Buscar quantidade atualizada do carrinho da resposta
+            const cartItem = result.items?.find(item => {
+                const itemBatchId = item.batch_id || (item as any).product_batch_id;
+                return itemBatchId === id;
+            });
+            const totalInCart = cartItem?.quantity || quantity;
+            
             Alert.alert(
                 '✅ Adicionado',
-                `${quantity} unidade(s) adicionada(s) ao carrinho!`,
+                `${quantity} unidade(s) adicionada(s) ao carrinho! Total no carrinho: ${totalInCart} unidade(s).`,
                 [
                     { text: 'Continuar Comprando', style: 'cancel' },
                     { text: 'Ver Carrinho', onPress: () => router.push('/(customer)/cart') },
                 ]
             );
         } catch (error: any) {
-            console.error('Error adding to cart:', error);
-            Alert.alert('Erro', error.message || 'Não foi possível adicionar ao carrinho.');
+            // REVERTER atualização otimista em caso de erro
+            incrementCartCount(-quantity);
+            
+            const errorMessage = error?.message || 'Não foi possível adicionar ao carrinho.';
+            const statusCode = error?.status || error?.statusCode;
+            
+            // Verificar se é timeout ou erro de rede
+            const isNetworkError = 
+                errorMessage.includes('timeout') ||
+                errorMessage.includes('Timeout') ||
+                errorMessage.includes('Failed to fetch') ||
+                errorMessage.includes('Network request failed') ||
+                errorMessage.includes('NetworkError');
+            
+            if (isNetworkError) {
+                Alert.alert(
+                    '⚠️ Erro de Conexão',
+                    'Não foi possível conectar ao servidor. Verifique sua conexão com a internet e tente novamente.',
+                    [{ text: 'OK' }]
+                );
+                return;
+            }
+            
+            // Detectar erro 409 (Conflict) - carrinho de outra loja
+            const isDifferentStoreError = 
+                statusCode === 409 ||
+                errorMessage.includes('outra loja') || 
+                errorMessage.includes('carrinho aberto') ||
+                errorMessage.toLowerCase().includes('loja diferente');
+            
+            if (isDifferentStoreError) {
+                console.log('[ProductDetail] ✅ Erro 409 detectado - Carrinho de outra loja');
+                
+                Alert.alert(
+                    '🛒 Carrinho de Outra Loja',
+                    'Você já possui produtos de outra loja no carrinho. O que deseja fazer?',
+                    [
+                        { 
+                            text: 'Cancelar', 
+                            style: 'cancel' 
+                        },
+                        { 
+                            text: 'Ver Carrinho Atual', 
+                            onPress: () => router.push('/(customer)/cart')
+                        },
+                        { 
+                            text: 'Substituir Carrinho', 
+                            style: 'destructive',
+                            onPress: async () => {
+                                try {
+                                    console.log('[ProductDetail] Substituindo carrinho e adicionando produto...');
+                                    const result = await api.addToCart(id!, quantity, true); // replaceCart=true
+                                    
+                                    // Usar resposta diretamente para atualizar cache
+                                    updateCartCache(result);
+                                    
+                                    // Buscar quantidade atualizada do carrinho da resposta
+                                    const cartItem = result.items?.find(item => {
+                                        const itemBatchId = item.batch_id || (item as any).product_batch_id;
+                                        return itemBatchId === id;
+                                    });
+                                    const totalInCart = cartItem?.quantity || quantity;
+                                    
+                                    Alert.alert(
+                                        '✅ Adicionado!',
+                                        `Carrinho substituído e ${quantity} unidade(s) adicionada(s). Total no carrinho: ${totalInCart} unidade(s).`,
+                                        [
+                                            { text: 'Continuar Comprando', style: 'cancel' },
+                                            { text: 'Ver Carrinho', onPress: () => router.push('/(customer)/cart') },
+                                        ]
+                                    );
+                                } catch (replaceError: any) {
+                                    console.error('[ProductDetail] Erro ao substituir carrinho:', replaceError);
+                                    Alert.alert(
+                                        'Erro',
+                                        replaceError?.message || 'Não foi possível substituir o carrinho. Tente novamente.'
+                                    );
+                                }
+                            }
+                        },
+                    ]
+                );
+                return;
+            }
+            
+            // Outros erros
+            console.error('[ProductDetail] Erro ao adicionar ao carrinho:', errorMessage);
+            Alert.alert('Erro', errorMessage);
         }
     };
 

@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
     FlatList,
     Image,
     ImageErrorEventData,
@@ -20,19 +21,29 @@ import {
 import { GradientBackground } from '../../components/GradientBackground';
 import { Colors } from '../../constants/Colors';
 import { useAuth } from '../../contexts/AuthContext';
+import { useCart } from '../../contexts/CartContext';
 import { api, Batch } from '../../services/api';
 import { PRODUCT_CATEGORIES } from '../../utils/validation';
 
 export default function VitrineScreen() {
     const { user, isProfileComplete } = useAuth();
+    const { incrementCartCount, updateCartCache } = useCart();
     const [batches, setBatches] = useState<Batch[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
     const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
-    const [isSearchFocused, setIsSearchFocused] = useState(false);
     const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
+    
+    // Paginação
+    const [page, setPage] = useState(1);
+    const [hasMore, setHasMore] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const ITEMS_PER_PAGE = 10;
+    
+    // Quantidade selecionada por produto
+    const [selectedQuantities, setSelectedQuantities] = useState<Record<string, number>>({});
     
     // Filtros
     const [showFilters, setShowFilters] = useState(false);
@@ -43,7 +54,7 @@ export default function VitrineScreen() {
 
     useFocusEffect(
         useCallback(() => {
-            loadBatches();
+            loadBatches(true);
         }, [selectedCategory, location, filterRadius])
     );
 
@@ -66,8 +77,14 @@ export default function VitrineScreen() {
         }
     };
 
-    const loadBatches = async () => {
-        console.log('Loading batches...');
+    const loadBatches = async (reset: boolean = false) => {
+        if (reset) {
+            setPage(1);
+            setBatches([]);
+            setHasMore(true);
+        }
+        
+        console.log('Loading batches...', { page: reset ? 1 : page });
         try {
             const params: any = {};
 
@@ -82,28 +99,56 @@ export default function VitrineScreen() {
                 params.raio_km = filterRadius ?? user?.radius_km ?? 5;
             }
 
-            // Add timeout to prevent infinite loading (aumentado para 15 segundos)
+            // Add timeout to prevent infinite loading (10 segundos)
             const fetchPromise = api.getPublicBatches(params);
             const timeoutPromise = new Promise<Batch[]>((resolve) =>
                 setTimeout(() => {
-                    console.log('Batches fetch timeout após 15s');
+                    // Não logar como erro, apenas informação
+                    console.log('[Vitrine] Timeout ao buscar batches após 10s - retornando vazio');
                     resolve([]);
-                }, 15000)
+                }, 10000)
             );
 
             const data = await Promise.race([fetchPromise, timeoutPromise]);
-            console.log('Batches loaded:', data.length);
             if (data.length > 0) {
-                console.log('Primeiro batch sample:', JSON.stringify(data[0], null, 2));
+                console.log('[Vitrine] Batches loaded:', data.length);
             }
-            setBatches(data);
+            
+            if (reset) {
+                setBatches(data);
+            } else {
+                setBatches(prev => [...prev, ...data]);
+            }
+            
+            // Verificar se há mais itens para carregar
+            setHasMore(data.length >= ITEMS_PER_PAGE);
             setImageErrors(new Set()); // Reset image errors on new load
-        } catch (error) {
-            console.error('Error loading batches:', error);
-            setBatches([]);
+        } catch (error: any) {
+            // Não logar erros de rede como ERROR se já foram tratados no api.ts
+            const isNetworkError = error?.message?.includes('Network request failed') || 
+                                 error?.message?.includes('Failed to fetch') ||
+                                 error?.message?.includes('timeout');
+            if (!isNetworkError) {
+                console.error('[Vitrine] Erro ao carregar batches:', error?.message || error);
+            }
+            if (reset) {
+                setBatches([]);
+            }
         } finally {
             setLoading(false);
             setRefreshing(false);
+            setLoadingMore(false);
+        }
+    };
+
+    const loadMoreBatches = () => {
+        // Por enquanto, não há paginação no backend
+        // Esta função está preparada para quando o backend suportar paginação
+        // Por enquanto, apenas carregamos tudo de uma vez
+        if (!loadingMore && hasMore && !loading && batches.length > 0) {
+            // Se houver mais itens filtrados que não foram mostrados, podemos simular paginação
+            // Mas por enquanto, apenas retornamos
+            return;
         }
     };
 
@@ -159,15 +204,144 @@ export default function VitrineScreen() {
 
     const onRefresh = () => {
         setRefreshing(true);
-        loadBatches();
+        loadBatches(true);
+    };
+
+    const handleQuantityChange = (batchId: string, delta: number) => {
+        setSelectedQuantities(prev => {
+            const current = prev[batchId] || 1;
+            const newQuantity = Math.max(1, Math.min(current + delta, 99));
+            return { ...prev, [batchId]: newQuantity };
+        });
     };
 
     const handleAddToCart = async (batch: Batch) => {
+        const quantity = selectedQuantities[batch.id] || 1;
+        const availableStock = batch.disponivel ?? batch.stock ?? batch.estoque_total ?? 0;
+        
+        if (quantity > availableStock) {
+            Alert.alert('Estoque insuficiente', `Apenas ${availableStock} unidade(s) disponível(eis).`);
+            return;
+        }
+        
+        console.log('[VitrineScreen] ========== ADICIONANDO AO CARRINHO ==========');
+        console.log('[VitrineScreen] Batch ID:', batch.id);
+        console.log('[VitrineScreen] Quantidade:', quantity);
+        
+        // ATUALIZAÇÃO OTIMISTA: Atualizar badge imediatamente
+        incrementCartCount(quantity);
+        
         try {
-            await api.addToCart(batch.id, 1);
-            // Show feedback
-        } catch (error) {
-            console.error('Error adding to cart:', error);
+            console.log('[VitrineScreen] Chamando api.addToCart...');
+            const startTime = Date.now();
+            const result = await api.addToCart(batch.id, quantity);
+            const duration = Date.now() - startTime;
+            console.log('[VitrineScreen] ✅ Produto adicionado com sucesso em', duration, 'ms');
+            console.log('[VitrineScreen] Resultado:', {
+                hasItems: !!result?.items,
+                itemsCount: result?.items?.length || 0,
+                total: result?.total || 0
+            });
+            
+            // Usar resposta diretamente para atualizar cache (evita requisição extra)
+            updateCartCache(result);
+            
+            // Feedback visual de sucesso
+            Alert.alert(
+                '✅ Adicionado!',
+                'Produto adicionado ao carrinho. A quantidade foi incrementada se o produto já estava no carrinho.',
+                [{ text: 'OK' }]
+            );
+        } catch (error: any) {
+            // REVERTER atualização otimista em caso de erro
+            incrementCartCount(-quantity);
+            
+            const errorMessage = error?.message || String(error) || 'Erro desconhecido';
+            const statusCode = error?.status || error?.statusCode;
+            
+            // Verificar se é timeout ou erro de rede
+            const isNetworkError = 
+                errorMessage.includes('timeout') ||
+                errorMessage.includes('Timeout') ||
+                errorMessage.includes('Failed to fetch') ||
+                errorMessage.includes('Network request failed') ||
+                errorMessage.includes('NetworkError');
+            
+            if (isNetworkError) {
+                console.error('[VitrineScreen] ⚠️ Erro de rede/timeout detectado');
+                Alert.alert(
+                    '⚠️ Erro de Conexão',
+                    'Não foi possível conectar ao servidor. Verifique sua conexão com a internet e tente novamente.',
+                    [{ text: 'OK' }]
+                );
+                return;
+            }
+            
+            // Detectar erro 409 (Conflict) - carrinho de outra loja
+            const isDifferentStoreError = 
+                statusCode === 409 ||
+                errorMessage.includes('outra loja') || 
+                errorMessage.includes('carrinho aberto') ||
+                errorMessage.toLowerCase().includes('loja diferente');
+            
+            if (isDifferentStoreError) {
+                console.log('[VitrineScreen] ✅ Erro 409 detectado - Carrinho de outra loja');
+                
+                Alert.alert(
+                    '🛒 Carrinho de Outra Loja',
+                    'Você já possui produtos de outra loja no carrinho. O que deseja fazer?',
+                    [
+                        { 
+                            text: 'Cancelar', 
+                            style: 'cancel' 
+                        },
+                        { 
+                            text: 'Ver Carrinho Atual', 
+                            onPress: () => {
+                                router.push('/(customer)/cart');
+                            }
+                        },
+                        { 
+                            text: 'Substituir Carrinho', 
+                            style: 'destructive',
+                            onPress: async () => {
+                                try {
+                                    console.log('[VitrineScreen] Substituindo carrinho e adicionando produto...');
+                                    const result = await api.addToCart(batch.id, quantity, true); // replaceCart=true
+                                    console.log('[VitrineScreen] ✅ Carrinho substituído com sucesso');
+                                    // Usar resposta diretamente para atualizar cache
+                                    updateCartCache(result);
+                                    Alert.alert(
+                                        '✅ Adicionado!',
+                                        'Carrinho substituído e produto adicionado com sucesso!',
+                                        [{ text: 'OK' }]
+                                    );
+                                } catch (replaceError: any) {
+                                    console.error('[VitrineScreen] Erro ao substituir carrinho:', replaceError);
+                                    Alert.alert(
+                                        'Erro',
+                                        replaceError?.message || 'Não foi possível substituir o carrinho. Tente novamente.'
+                                    );
+                                }
+                            }
+                        },
+                    ]
+                );
+                
+                return;
+            }
+            
+            // Outros erros - logar como ERROR e mostrar mensagem
+            console.error('[VitrineScreen] ========== ERRO AO ADICIONAR ==========');
+            console.error('[VitrineScreen] Tipo do erro:', error?.constructor?.name);
+            console.error('[VitrineScreen] Mensagem:', errorMessage);
+            console.error('[VitrineScreen] Status Code:', statusCode);
+            console.error('[VitrineScreen] Stack:', error?.stack);
+            
+            Alert.alert(
+                'Erro', 
+                errorMessage || 'Não foi possível adicionar ao carrinho. Tente novamente.'
+            );
         }
     };
 
@@ -200,14 +374,41 @@ export default function VitrineScreen() {
         // Prices - handle both PT-BR and EN field names
         const originalPrice = item.original_price ?? item.preco_normal_override ?? productData?.preco_normal ?? 0;
         const promoPrice = item.promo_price ?? item.preco_promocional ?? 0;
-        const discountPercent = item.discount_percent ?? item.desconto_percentual ?? 0;
         
-        // Store name
+        // Calcular desconto se não vier do backend ou calcular baseado nos preços
+        let discountPercent = item.discount_percent ?? item.desconto_percentual ?? 0;
+        
+        // Se não tem desconto explícito mas tem diferença de preço, calcular
+        if ((discountPercent === 0 || !discountPercent || isNaN(discountPercent)) && originalPrice > 0 && promoPrice > 0 && originalPrice > promoPrice) {
+            discountPercent = ((originalPrice - promoPrice) / originalPrice) * 100;
+        }
+        
+        // Garantir que temos um número válido
+        discountPercent = Math.max(0, Math.min(100, discountPercent || 0));
+        
+        // Debug: logar valores para verificar
+        if (originalPrice > promoPrice && discountPercent === 0) {
+            console.log('[Vitrine] Desconto calculado:', {
+                originalPrice,
+                promoPrice,
+                calculatedDiscount: ((originalPrice - promoPrice) / originalPrice) * 100,
+                itemDiscount: item.discount_percent ?? item.desconto_percentual
+            });
+        }
+        
+        // Store info
         const storeName = item.store?.name || (item.store as any)?.nome || 'Loja';
+        const storeHours = item.store?.hours || (item.store as any)?.horario_funcionamento || '';
+        const storeLogo = item.store?.logo_url || null;
+        
+        // Stock
+        const availableStock = item.disponivel ?? item.stock ?? item.estoque_total ?? 0;
+        const selectedQuantity = selectedQuantities[item.id] || 1;
         
         // Expiration date and days calculation
         const expirationDate = item.expiration_date || item.data_vencimento || null;
         let expirationDisplay = 'N/A';
+        let expirationDateFormatted = '';
         let daysToExpire: number | null = null;
         if (expirationDate) {
             const expDate = new Date(expirationDate);
@@ -216,6 +417,12 @@ export default function VitrineScreen() {
             expDate.setHours(0, 0, 0, 0);
             const diffTime = expDate.getTime() - today.getTime();
             daysToExpire = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            
+            expirationDateFormatted = expDate.toLocaleDateString('pt-BR', { 
+                day: '2-digit', 
+                month: '2-digit', 
+                year: 'numeric' 
+            });
             
             if (daysToExpire < 0) {
                 expirationDisplay = 'Vencido';
@@ -237,119 +444,198 @@ export default function VitrineScreen() {
             setImageErrors(prev => new Set(prev).add(imageKey));
         };
 
+        const storeId = item.store_id || (item.store as any)?.id;
+        
         return (
-            <TouchableOpacity
-                style={styles.productCard}
-                onPress={() => router.push(`/product/${item.id}`)}
-                activeOpacity={0.9}
-            >
-                <View style={styles.productImageContainer}>
+            <View style={styles.productCardHorizontal}>
+                {/* Store Logo - Topo centralizado, metade dentro/metade fora - Clicável para ir à loja */}
+                {storeLogo && storeId && (
+                    <TouchableOpacity
+                        style={styles.storeLogoTopContainer}
+                        onPress={() => {
+                            // Navegar para produtos da loja
+                            router.push({
+                                pathname: '/(customer)/store-products',
+                                params: { storeId }
+                            });
+                        }}
+                        activeOpacity={0.8}
+                    >
+                        <View style={styles.storeLogoTop}>
+                            <Image
+                                source={{ uri: storeLogo }}
+                                style={styles.storeLogoTopImage}
+                                resizeMode="cover"
+                            />
+                        </View>
+                    </TouchableOpacity>
+                )}
+
+                {/* Imagem do produto - Clicável para ver detalhes */}
+                <TouchableOpacity
+                    style={styles.productImageContainerHorizontal}
+                    onPress={() => router.push(`/product/${item.id}`)}
+                    activeOpacity={0.9}
+                >
                     {imageUri ? (
                         <Image
                             source={{ uri: imageUri }}
-                            style={styles.productImage}
+                            style={styles.productImageHorizontal}
                             resizeMode="cover"
                             onError={handleImageError}
                         />
                     ) : (
-                        <View style={styles.imagePlaceholder}>
-                            <Ionicons name="image-outline" size={48} color={Colors.textMuted} />
+                        <View style={styles.imagePlaceholderHorizontal}>
+                            <Ionicons name="image-outline" size={40} color={Colors.textMuted} />
                             <Text style={styles.imagePlaceholderText}>Sem imagem</Text>
                         </View>
                     )}
                     
-                    {/* Store logo - bolinha com logo do estabelecimento */}
-                    {item.store?.logo_url && (
-                        <View style={styles.storeLogoBadge}>
-                            <Image
-                                source={{ uri: item.store.logo_url }}
-                                style={styles.storeLogoImage}
-                                resizeMode="cover"
-                            />
-                        </View>
-                    )}
-                    
-                    {/* Discount badge - porcentagem de desconto */}
+                    {/* Discount badge - porcentagem de desconto grande e visível */}
                     {discountPercent > 0 && (
-                        <View style={styles.discountBadge}>
-                            <Text style={styles.discountText}>{Math.round(discountPercent)}% OFF</Text>
+                        <View style={styles.discountBadgeLarge}>
+                            <Text style={styles.discountTextLarge}>-{Math.round(discountPercent)}%</Text>
                         </View>
                     )}
-                    
-                    {/* Store name overlay na parte inferior */}
-                    <View style={styles.storeNameOverlay}>
-                        <Text style={styles.storeNameOverlayText} numberOfLines={1}>
-                            {storeName}
-                        </Text>
-                    </View>
-                    
-                    {/* Stock indicator - apenas se estoque muito baixo */}
-                    {(item.stock ?? item.estoque_total ?? 0) > 0 && (item.stock ?? item.estoque_total ?? 0) <= 2 && (
-                        <View style={styles.stockBadge}>
-                            <Text style={styles.stockText}>Últimas {item.stock ?? item.estoque_total ?? 0} un.</Text>
-                        </View>
-                    )}
-                </View>
+                </TouchableOpacity>
 
-                <View style={styles.productInfo}>
-                    {/* Product name - mais compacto (removido nome do mercado pois está na imagem) */}
-                    <Text style={styles.productName} numberOfLines={2}>
+                <View style={styles.productInfoHorizontal}>
+                    {/* Store name */}
+                    <Text style={styles.storeNameHorizontal} numberOfLines={1}>
+                        {storeName}
+                    </Text>
+                    
+                    {/* Product name */}
+                    <Text style={styles.productNameHorizontal} numberOfLines={2}>
                         {productName}
                     </Text>
                     
-                    {/* Price row - mais compacto com desconto visível */}
-                    <View style={styles.priceRow}>
-                        <View style={styles.priceContainer}>
-                            {originalPrice > promoPrice && (
-                                <Text style={styles.originalPrice}>R$ {originalPrice.toFixed(2).replace('.', ',')}</Text>
-                            )}
-                            <Text style={styles.promoPrice}>R$ {promoPrice.toFixed(2).replace('.', ',')}</Text>
+                    {/* Store hours - aumentado tamanho */}
+                    {storeHours && (
+                        <View style={styles.storeHoursRow}>
+                            <Ionicons name="time-outline" size={14} color={Colors.textMuted} />
+                            <Text style={styles.storeHoursText} numberOfLines={1}>
+                                {storeHours}
+                            </Text>
                         </View>
-                        {discountPercent > 0 && (
-                            <View style={styles.discountTag}>
-                                <Text style={styles.discountTagText}>-{Math.round(discountPercent)}%</Text>
+                    )}
+                    
+                    {/* Price row - sem porcentagem (já está na foto) */}
+                    <View style={styles.priceRowHorizontal}>
+                        <View style={styles.priceContainerHorizontal}>
+                            {originalPrice > promoPrice && (
+                                <Text style={styles.originalPriceHorizontal}>
+                                    R$ {originalPrice.toFixed(2).replace('.', ',')}
+                                </Text>
+                            )}
+                            <Text style={styles.promoPriceHorizontal}>
+                                R$ {promoPrice.toFixed(2).replace('.', ',')}
+                            </Text>
+                        </View>
+                    </View>
+
+                    {/* Expiration date - mais visível */}
+                    {expirationDate && (
+                        <View style={styles.expirationRowHorizontal}>
+                            <Ionicons 
+                                name="calendar-outline" 
+                                size={14} 
+                                color={daysToExpire !== null && daysToExpire <= 2 ? Colors.error : Colors.warning} 
+                            />
+                            <View style={styles.expirationInfo}>
+                                <Text style={[
+                                    styles.expirationTextHorizontal,
+                                    daysToExpire !== null && daysToExpire <= 2 && styles.expirationTextUrgent
+                                ]}>
+                                    {expirationDisplay}
+                                </Text>
+                                <Text style={styles.expirationDateText}>
+                                    {expirationDateFormatted}
+                                </Text>
+                            </View>
+                        </View>
+                    )}
+
+                    {/* Stock and quantity selector */}
+                    <View style={styles.stockQuantityRow}>
+                        <View style={styles.stockInfo}>
+                            <Ionicons name="cube-outline" size={12} color={Colors.textMuted} />
+                            <Text style={styles.stockText}>
+                                {availableStock > 0 ? `${availableStock} disponível(eis)` : 'Esgotado'}
+                            </Text>
+                        </View>
+                        
+                        {/* Quantity selector */}
+                        {availableStock > 0 && (
+                            <View style={styles.quantitySelector}>
+                                <TouchableOpacity
+                                    style={[styles.quantityButton, selectedQuantity <= 1 && styles.quantityButtonDisabled]}
+                                    onPress={(e) => {
+                                        e.stopPropagation();
+                                        handleQuantityChange(item.id, -1);
+                                    }}
+                                    disabled={selectedQuantity <= 1}
+                                >
+                                    <Ionicons 
+                                        name="remove" 
+                                        size={16} 
+                                        color={selectedQuantity <= 1 ? Colors.textMuted : Colors.text} 
+                                    />
+                                </TouchableOpacity>
+                                <Text style={styles.quantityText}>{selectedQuantity}</Text>
+                                <TouchableOpacity
+                                    style={[styles.quantityButton, selectedQuantity >= availableStock && styles.quantityButtonDisabled]}
+                                    onPress={(e) => {
+                                        e.stopPropagation();
+                                        handleQuantityChange(item.id, 1);
+                                    }}
+                                    disabled={selectedQuantity >= availableStock}
+                                >
+                                    <Ionicons 
+                                        name="add" 
+                                        size={16} 
+                                        color={selectedQuantity >= availableStock ? Colors.textMuted : Colors.text} 
+                                    />
+                                </TouchableOpacity>
                             </View>
                         )}
                     </View>
 
-                    {/* Expiration - mais compacto com dias */}
-                    <View style={styles.expirationRow}>
-                        <Ionicons 
-                            name="time-outline" 
-                            size={13} 
-                            color={daysToExpire !== null && daysToExpire <= 2 ? Colors.error : Colors.warning} 
-                        />
-                        <Text style={[
-                            styles.expirationText,
-                            daysToExpire !== null && daysToExpire <= 2 && styles.expirationTextUrgent
-                        ]}>
-                            {expirationDisplay}
-                        </Text>
-                    </View>
-
-                    {/* Add button - mais compacto */}
+                    {/* Add button - parte inferior do card */}
                     <TouchableOpacity
-                        style={styles.addButton}
+                        style={[
+                            styles.addButtonHorizontal,
+                            availableStock === 0 && styles.addButtonDisabled
+                        ]}
                         onPress={(e) => {
                             e.stopPropagation();
-                            handleAddToCart(item);
+                            if (availableStock > 0) {
+                                handleAddToCart(item);
+                            }
                         }}
+                        disabled={availableStock === 0}
                     >
-                        <Ionicons name="cart" size={14} color={Colors.text} />
-                        <Text style={styles.addButtonText}>Adicionar</Text>
+                        <Ionicons 
+                            name={availableStock > 0 ? "cart" : "close-circle"} 
+                            size={16} 
+                            color={Colors.text} 
+                        />
+                        <Text style={styles.addButtonTextHorizontal}>
+                            {availableStock > 0 ? `Adicionar ${selectedQuantity > 1 ? `${selectedQuantity}x` : ''}` : 'Esgotado'}
+                        </Text>
                     </TouchableOpacity>
                 </View>
-            </TouchableOpacity>
+            </View>
         );
     };
 
     // Skeleton loader component
     const renderSkeletonCard = () => (
-        <View style={styles.productCard}>
-            <View style={[styles.productImageContainer, styles.skeleton]}>
+        <View style={styles.productCardHorizontal}>
+            <View style={[styles.productImageContainerHorizontal, styles.skeleton]}>
                 <ActivityIndicator size="small" color={Colors.primary} />
             </View>
-            <View style={styles.productInfo}>
+            <View style={styles.productInfoHorizontal}>
                 <View style={[styles.skeleton, styles.skeletonText, { width: '60%', marginBottom: 8 }]} />
                 <View style={[styles.skeleton, styles.skeletonText, { width: '100%', marginBottom: 4 }]} />
                 <View style={[styles.skeleton, styles.skeletonText, { width: '80%', marginBottom: 12 }]} />
@@ -377,24 +663,23 @@ export default function VitrineScreen() {
                     </View>
                     
                     {/* Categories skeleton */}
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoriesScroll}>
-                        <View style={styles.categoriesContainer}>
-                            {[1, 2, 3, 4].map(i => (
-                                <View key={i} style={[styles.skeleton, { width: 80, height: 36, borderRadius: 12, marginRight: 8 }]} />
-                            ))}
-                        </View>
-                    </ScrollView>
+                    <View style={styles.categoriesWrapper}>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoriesScroll}>
+                            <View style={styles.categoriesContainer}>
+                                {[1, 2, 3, 4].map(i => (
+                                    <View key={i} style={[styles.skeleton, { width: 80, height: 36, borderRadius: 20, marginRight: 8 }]} />
+                                ))}
+                            </View>
+                        </ScrollView>
+                    </View>
                     
-                    {/* Products skeleton grid */}
-                    <View style={styles.productsContainer}>
-                        <View style={styles.row}>
+                    {/* Products skeleton - lista horizontal */}
+                    <View style={styles.productsWrapper}>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.productsContainerHorizontal}>
                             {renderSkeletonCard()}
                             {renderSkeletonCard()}
-                        </View>
-                        <View style={styles.row}>
                             {renderSkeletonCard()}
-                            {renderSkeletonCard()}
-                        </View>
+                        </ScrollView>
                     </View>
                 </View>
             </GradientBackground>
@@ -404,48 +689,48 @@ export default function VitrineScreen() {
     return (
         <GradientBackground>
             <View style={styles.container}>
-                {/* Header */}
+                {/* Header Compacto */}
                 <View style={styles.header}>
-                    <View>
+                    <View style={styles.headerContent}>
                         <Text style={styles.greeting}>
                             Olá{user?.name ? `, ${user.name.split(' ')[0]}` : ''}! 👋
                         </Text>
                         <Text style={styles.title}>Ofertas do dia</Text>
                     </View>
-                    <TouchableOpacity
-                        style={styles.cartButton}
-                        onPress={() => router.push('/(customer)/cart')}
-                    >
-                        <Ionicons name="cart-outline" size={24} color={Colors.text} />
-                    </TouchableOpacity>
                 </View>
 
-                {/* Search Bar */}
+                {/* Search Bar Compacto */}
                 <View style={styles.searchContainer}>
-                    <View style={[styles.searchBar, isSearchFocused && styles.searchBarFocused]}>
-                        <Ionicons name="search" size={20} color={Colors.textMuted} />
+                    <View style={styles.searchBar}>
+                        <Ionicons name="search" size={18} color={Colors.textMuted} />
                         <TextInput
-                            style={styles.searchInput}
-                            placeholder="Buscar produto ou loja..."
+                            style={[styles.searchInput, { color: Colors.text }]}
+                            placeholder="Buscar..."
                             placeholderTextColor={Colors.textMuted}
                             value={searchQuery}
                             onChangeText={setSearchQuery}
-                            onFocus={() => setIsSearchFocused(true)}
-                            onBlur={() => setIsSearchFocused(false)}
+                            autoCorrect={false}
+                            autoCapitalize="none"
+                            selectionColor={Colors.primary}
+                            cursorColor={Colors.primary}
                         />
                         {searchQuery.length > 0 && (
                             <TouchableOpacity onPress={() => setSearchQuery('')}>
-                                <Ionicons name="close-circle" size={20} color={Colors.textMuted} />
+                                <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
                             </TouchableOpacity>
                         )}
                         <TouchableOpacity
-                            style={styles.filterButton}
+                            style={[
+                                styles.filterButton,
+                                (showFilters || filterMinPrice || filterMaxPrice || filterMaxDaysToExpire) && styles.filterButtonActive
+                            ]}
                             onPress={() => setShowFilters(!showFilters)}
+                            activeOpacity={0.7}
                         >
                             <Ionicons 
-                                name="options-outline" 
-                                size={20} 
-                                color={showFilters || filterMinPrice || filterMaxPrice || filterMaxDaysToExpire ? Colors.primary : Colors.textMuted} 
+                                name="filter" 
+                                size={22} 
+                                color={(showFilters || filterMinPrice || filterMaxPrice || filterMaxDaysToExpire) ? Colors.primary : Colors.textMuted} 
                             />
                         </TouchableOpacity>
                     </View>
@@ -571,35 +856,37 @@ export default function VitrineScreen() {
                     </View>
                 )}
 
-                {/* Categories */}
-                <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.categoriesContainer}
-                    style={styles.categoriesScroll}
-                >
-                    {[{ value: '', label: 'Todos' }, ...PRODUCT_CATEGORIES].map((cat) => (
-                        <TouchableOpacity
-                            key={cat.value || 'all'}
-                            style={[
-                                styles.categoryChip,
-                                selectedCategory === cat.value && styles.categoryChipActive,
-                            ]}
-                            onPress={() => setSelectedCategory(
-                                selectedCategory === cat.value ? null : cat.value
-                            )}
-                        >
-                            <Text style={[
-                                styles.categoryText,
-                                selectedCategory === cat.value && styles.categoryTextActive,
-                            ]}>
-                                {cat.label}
-                            </Text>
-                        </TouchableOpacity>
-                    ))}
-                </ScrollView>
+                {/* Categories - Melhor Visualização */}
+                <View style={styles.categoriesWrapper}>
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.categoriesContainer}
+                        style={styles.categoriesScroll}
+                    >
+                        {[{ value: '', label: 'Todos' }, ...PRODUCT_CATEGORIES].map((cat) => (
+                            <TouchableOpacity
+                                key={cat.value || 'all'}
+                                style={[
+                                    styles.categoryChip,
+                                    selectedCategory === cat.value && styles.categoryChipActive,
+                                ]}
+                                onPress={() => setSelectedCategory(
+                                    selectedCategory === cat.value ? null : cat.value
+                                )}
+                            >
+                                <Text style={[
+                                    styles.categoryText,
+                                    selectedCategory === cat.value && styles.categoryTextActive,
+                                ]}>
+                                    {cat.label}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                </View>
 
-                {/* Products Grid */}
+                {/* Products - Lista Horizontal */}
                 {filteredBatches.length === 0 ? (
                     <View style={styles.emptyContainer}>
                         <View style={styles.emptyIcon}>
@@ -618,29 +905,38 @@ export default function VitrineScreen() {
                         </Text>
                     </View>
                 ) : (
-                    <FlatList
-                        data={filteredBatches}
-                        renderItem={renderBatch}
-                        keyExtractor={(item) => item.id}
-                        numColumns={2}
-                        columnWrapperStyle={styles.row}
-                        contentContainerStyle={styles.productsContainer}
-                        showsVerticalScrollIndicator={false}
-                        refreshControl={
-                            <RefreshControl
-                                refreshing={refreshing}
-                                onRefresh={onRefresh}
-                                tintColor={Colors.primary}
-                            />
-                        }
-                        ListHeaderComponent={
-                            searchQuery ? (
-                                <Text style={styles.searchResultsText}>
-                                    {filteredBatches.length} resultado(s) para "{searchQuery}"
-                                </Text>
-                            ) : null
-                        }
-                    />
+                    <View style={styles.productsWrapper}>
+                        {searchQuery && (
+                            <Text style={styles.searchResultsText}>
+                                {filteredBatches.length} resultado(s) para "{searchQuery}"
+                            </Text>
+                        )}
+                        <FlatList
+                            data={filteredBatches}
+                            renderItem={renderBatch}
+                            keyExtractor={(item) => item.id}
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.productsContainerHorizontal}
+                            style={styles.productsList}
+                            refreshControl={
+                                <RefreshControl
+                                    refreshing={refreshing}
+                                    onRefresh={onRefresh}
+                                    tintColor={Colors.primary}
+                                />
+                            }
+                            onEndReached={loadMoreBatches}
+                            onEndReachedThreshold={0.5}
+                            ListFooterComponent={
+                                loadingMore ? (
+                                    <View style={styles.loadingMoreContainer}>
+                                        <ActivityIndicator size="small" color={Colors.primary} />
+                                    </View>
+                                ) : null
+                            }
+                        />
+                    </View>
                 )}
             </View>
         </GradientBackground>
@@ -650,7 +946,7 @@ export default function VitrineScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        paddingTop: 60,
+        paddingTop: 50,
     },
     loadingContainer: {
         flex: 1,
@@ -663,31 +959,22 @@ const styles = StyleSheet.create({
         fontSize: 14,
     },
     header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 24,
-        marginBottom: 16,
+        paddingHorizontal: 20,
+        marginBottom: 12,
+        paddingTop: 8,
+    },
+    headerContent: {
+        flexDirection: 'column',
     },
     greeting: {
-        fontSize: 14,
+        fontSize: 13,
         color: Colors.textSecondary,
-        marginBottom: 4,
+        marginBottom: 2,
     },
     title: {
-        fontSize: 28,
+        fontSize: 24,
         fontWeight: '700',
         color: Colors.text,
-    },
-    cartButton: {
-        width: 48,
-        height: 48,
-        borderRadius: 14,
-        backgroundColor: Colors.glass,
-        borderWidth: 1,
-        borderColor: Colors.glassBorder,
-        alignItems: 'center',
-        justifyContent: 'center',
     },
     locationInfo: {
         flexDirection: 'row',
@@ -700,50 +987,77 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: Colors.textSecondary,
     },
+    categoriesWrapper: {
+        marginBottom: 16,
+    },
     categoriesScroll: {
         maxHeight: 50,
         flexGrow: 0,
     },
     categoriesContainer: {
-        paddingHorizontal: 24,
-        paddingVertical: 4,
+        paddingHorizontal: 20,
+        paddingVertical: 6,
         gap: 8,
         flexDirection: 'row',
     },
     categoryChip: {
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-        borderRadius: 12,
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 20,
         backgroundColor: Colors.glass,
-        borderWidth: 1,
+        borderWidth: 1.5,
         borderColor: Colors.glassBorder,
         marginRight: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
     },
     categoryChipActive: {
         backgroundColor: Colors.primary,
         borderColor: Colors.primary,
+        shadowColor: Colors.primary,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+        elevation: 4,
     },
     categoryText: {
-        fontSize: 13,
+        fontSize: 12,
         color: Colors.textSecondary,
-        fontWeight: '500',
+        fontWeight: '600',
     },
     categoryTextActive: {
         color: Colors.text,
-        fontWeight: '600',
+        fontWeight: '700',
     },
     filterButton: {
-        padding: 8,
-        marginLeft: 8,
+        padding: 6,
+        marginLeft: 4,
+        borderRadius: 8,
+        backgroundColor: 'transparent',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 36,
+        height: 36,
+    },
+    filterButtonActive: {
+        backgroundColor: Colors.primary + '20',
     },
     filtersContainer: {
         backgroundColor: Colors.backgroundCard,
         borderRadius: 16,
-        padding: 16,
-        marginHorizontal: 16,
+        padding: 18,
+        marginHorizontal: 20,
         marginBottom: 16,
-        borderWidth: 1,
+        borderWidth: 1.5,
         borderColor: Colors.glassBorder,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 3,
     },
     filterSection: {
         marginBottom: 20,
@@ -788,25 +1102,30 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     daysChip: {
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 8,
+        paddingHorizontal: 14,
+        paddingVertical: 9,
+        borderRadius: 20,
         backgroundColor: Colors.glass,
-        borderWidth: 1,
+        borderWidth: 1.5,
         borderColor: Colors.glassBorder,
     },
     daysChipActive: {
         backgroundColor: Colors.primary,
         borderColor: Colors.primary,
+        shadowColor: Colors.primary,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 3,
+        elevation: 3,
     },
     daysChipText: {
         fontSize: 12,
         color: Colors.textSecondary,
-        fontWeight: '500',
+        fontWeight: '600',
     },
     daysChipTextActive: {
         color: Colors.text,
-        fontWeight: '600',
+        fontWeight: '700',
     },
     radiusFilterRow: {
         flexDirection: 'row',
@@ -814,25 +1133,30 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     radiusChip: {
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 8,
+        paddingHorizontal: 14,
+        paddingVertical: 9,
+        borderRadius: 20,
         backgroundColor: Colors.glass,
-        borderWidth: 1,
+        borderWidth: 1.5,
         borderColor: Colors.glassBorder,
     },
     radiusChipActive: {
         backgroundColor: Colors.primary,
         borderColor: Colors.primary,
+        shadowColor: Colors.primary,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 3,
+        elevation: 3,
     },
     radiusChipText: {
         fontSize: 12,
         color: Colors.textSecondary,
-        fontWeight: '500',
+        fontWeight: '600',
     },
     radiusChipTextActive: {
         color: Colors.text,
-        fontWeight: '600',
+        fontWeight: '700',
     },
     clearFiltersButton: {
         flexDirection: 'row',
@@ -847,39 +1171,83 @@ const styles = StyleSheet.create({
         color: Colors.textMuted,
         fontWeight: '500',
     },
-    productsContainer: {
-        paddingHorizontal: 16,
-        paddingBottom: 100,
+    productsWrapper: {
+        flex: 1,
+        paddingBottom: 20,
     },
-    row: {
-        justifyContent: 'space-between',
-        paddingHorizontal: 8,
+    productsList: {
+        flex: 1,
     },
-    productCard: {
-        width: '48%',
+    productsContainerHorizontal: {
+        paddingHorizontal: 20,
+        paddingVertical: 8,
+        paddingTop: 10,
+        paddingBottom: 40,
+        gap: 16,
+    },
+    productCardHorizontal: {
+        width: 300,
+        minHeight: 460,
         backgroundColor: Colors.backgroundCard,
-        borderRadius: 14,
-        borderWidth: 1,
+        borderRadius: 20,
+        borderWidth: 1.5,
         borderColor: Colors.glassBorder,
-        overflow: 'hidden',
-        marginBottom: 14,
+        overflow: 'visible',
+        marginRight: 16,
+        marginTop: 25,
+        marginBottom: 30,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
+        elevation: 5,
+        position: 'relative',
     },
-    productImageContainer: {
-        aspectRatio: 1,
+    storeLogoTopContainer: {
+        position: 'absolute',
+        top: -35,
+        left: 0,
+        right: 0,
+        alignItems: 'center',
+        zIndex: 10,
+    },
+    storeLogoTop: {
+        width: 85,
+        height: 85,
+        borderRadius: 42.5,
+        backgroundColor: Colors.backgroundCard,
+        borderWidth: 4,
+        borderColor: Colors.backgroundCard,
+        overflow: 'hidden',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 8,
+    },
+    storeLogoTopImage: {
+        width: '100%',
+        height: '100%',
+    },
+    productImageContainerHorizontal: {
+        width: '100%',
+        height: 180,
         backgroundColor: Colors.glass,
         position: 'relative',
         overflow: 'hidden',
-        borderRadius: 14,
+        marginTop: 25,
     },
-    productImage: {
+    productImageHorizontal: {
         width: '100%',
         height: '100%',
         backgroundColor: Colors.glass,
+    },
+    imagePlaceholderHorizontal: {
+        width: '100%',
+        height: '100%',
+        backgroundColor: Colors.glass,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     imagePlaceholder: {
         width: '100%',
@@ -914,6 +1282,26 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.25,
         shadowRadius: 3.84,
         elevation: 5,
+    },
+    discountBadgeLarge: {
+        position: 'absolute',
+        top: 10,
+        right: 10,
+        backgroundColor: Colors.error,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 12,
+        shadowColor: Colors.error,
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.4,
+        shadowRadius: 5,
+        elevation: 6,
+    },
+    discountTextLarge: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: Colors.text,
+        letterSpacing: 0.5,
     },
     stockBadge: {
         position: 'absolute',
@@ -971,90 +1359,188 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: Colors.text,
     },
-    productInfo: {
-        padding: 10,
+    productInfoHorizontal: {
+        padding: 12,
+        paddingBottom: 10,
         flex: 1,
+        justifyContent: 'space-between',
     },
-    storeName: {
-        fontSize: 10,
+    storeNameHorizontal: {
+        fontSize: 11,
         color: Colors.textMuted,
         marginBottom: 4,
-        fontWeight: '500',
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
     },
-    productName: {
+    storeHoursRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginBottom: 8,
+        marginTop: 2,
+    },
+    storeHoursText: {
         fontSize: 13,
+        color: Colors.textMuted,
+        fontWeight: '600',
+    },
+    productNameHorizontal: {
+        fontSize: 15,
         fontWeight: '600',
         color: Colors.text,
-        marginBottom: 8,
+        marginBottom: 0,
         minHeight: 32,
-        lineHeight: 16,
+        lineHeight: 20,
     },
-    priceRow: {
+    priceRowHorizontal: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         marginBottom: 6,
+        marginTop: 4,
     },
-    priceContainer: {
+    priceContainerHorizontal: {
         flexDirection: 'row',
         alignItems: 'baseline',
         gap: 6,
         flex: 1,
     },
-    originalPrice: {
+    originalPriceHorizontal: {
         fontSize: 11,
         color: Colors.textMuted,
         textDecorationLine: 'line-through',
     },
-    promoPrice: {
-        fontSize: 17,
+    promoPriceHorizontal: {
+        fontSize: 18,
         fontWeight: '700',
         color: Colors.success,
     },
     discountTag: {
-        backgroundColor: Colors.error + '20',
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 6,
+        backgroundColor: Colors.error + '30',
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 10,
+        marginLeft: 8,
+        borderWidth: 1,
+        borderColor: Colors.error + '40',
     },
     discountTagText: {
-        fontSize: 11,
-        fontWeight: '700',
+        fontSize: 13,
+        fontWeight: '800',
         color: Colors.error,
+        letterSpacing: 0.5,
     },
-    expirationRow: {
+    expirationRowHorizontal: {
         flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        marginBottom: 8,
+        alignItems: 'flex-start',
+        gap: 6,
+        marginBottom: 6,
+        paddingVertical: 5,
+        paddingHorizontal: 8,
+        backgroundColor: Colors.glass,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: Colors.glassBorder,
     },
-    expirationText: {
-        fontSize: 11,
+    expirationInfo: {
+        flex: 1,
+    },
+    expirationTextHorizontal: {
+        fontSize: 12,
         color: Colors.warning,
-        fontWeight: '500',
+        fontWeight: '600',
+        marginBottom: 2,
     },
     expirationTextUrgent: {
         color: Colors.error,
-        fontWeight: '600',
+        fontWeight: '700',
     },
-    addButton: {
+    expirationDateText: {
+        fontSize: 10,
+        color: Colors.textMuted,
+        fontWeight: '500',
+    },
+    stockQuantityRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 6,
+        paddingVertical: 5,
+        paddingHorizontal: 8,
+        backgroundColor: Colors.glass,
+        borderRadius: 8,
+    },
+    stockInfo: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        flex: 1,
+    },
+    stockText: {
+        fontSize: 11,
+        color: Colors.textMuted,
+        fontWeight: '500',
+    },
+    quantitySelector: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        backgroundColor: Colors.backgroundCard,
+        borderRadius: 8,
+        paddingHorizontal: 4,
+        paddingVertical: 4,
+        borderWidth: 1,
+        borderColor: Colors.glassBorder,
+    },
+    quantityButton: {
+        width: 28,
+        height: 28,
+        borderRadius: 6,
+        backgroundColor: Colors.glass,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    quantityButtonDisabled: {
+        opacity: 0.4,
+    },
+    quantityText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: Colors.text,
+        minWidth: 24,
+        textAlign: 'center',
+    },
+    addButtonHorizontal: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: Colors.primary,
-        borderRadius: 8,
-        paddingVertical: 8,
-        gap: 5,
+        borderRadius: 12,
+        paddingVertical: 11,
+        gap: 8,
         shadowColor: Colors.primary,
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 3,
-        elevation: 3,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.4,
+        shadowRadius: 6,
+        elevation: 5,
+        marginTop: 2,
     },
-    addButtonText: {
-        fontSize: 12,
-        fontWeight: '600',
+    addButtonDisabled: {
+        backgroundColor: Colors.glass,
+        opacity: 0.6,
+    },
+    addButtonTextHorizontal: {
+        fontSize: 14,
+        fontWeight: '700',
         color: Colors.text,
+        letterSpacing: 0.3,
+    },
+    loadingMoreContainer: {
+        padding: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 100,
     },
     emptyContainer: {
         flex: 1,
@@ -1083,27 +1569,27 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
     searchContainer: {
-        paddingHorizontal: 24,
+        paddingHorizontal: 20,
         marginBottom: 12,
     },
     searchBar: {
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: Colors.glass,
-        borderRadius: 14,
+        borderRadius: 12,
         borderWidth: 1,
         borderColor: Colors.glassBorder,
-        paddingHorizontal: 14,
-        paddingVertical: 12,
-        gap: 10,
-    },
-    searchBarFocused: {
-        borderColor: Colors.primary,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        gap: 8,
+        height: 44,
     },
     searchInput: {
         flex: 1,
-        fontSize: 15,
+        fontSize: 14,
         color: Colors.text,
+        padding: 0,
+        margin: 0,
     },
     searchResultsText: {
         fontSize: 13,

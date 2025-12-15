@@ -6,6 +6,7 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { GradientBackground } from '../components/GradientBackground';
 import { Colors } from '../constants/Colors';
+import { API_BASE_URL } from '../constants/config';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../services/api';
 import { getSession, supabase } from '../services/supabase';
@@ -135,16 +136,16 @@ export default function LoginScreen() {
                 isProfileComplete,
                 roleIsNull: role === null,
                 roleIsUndefined: role === undefined,
-                roleIsEmpty: role === '',
                 roleIsFalsy: !role,
-                userKeys: Object.keys(user || {}),
-                fullUserObject: JSON.stringify(user, null, 2)
+                userKeys: Object.keys(user || {})
             });
 
             // Check if role is empty/null/undefined - user needs to select role
             // IMPORTANTE: Só redireciona para /select-role se REALMENTE não tiver role
             // Se o usuário já tem role cadastrado, não deve ir para seleção de role
-            const roleIsEmpty = !role || role === null || role === undefined || role === '' || role === 'undefined';
+            // role é do tipo 'customer' | 'merchant' | 'store_owner' | undefined
+            // Não pode ser string vazia ou 'undefined' (string), então só verificamos undefined e falsy
+            const roleIsEmpty = !role || role === undefined;
             if (roleIsEmpty) {
                 console.log('[LoginScreen] ⚠️ NENHUM ROLE - Redirecionando para seleção de role');
                 isProcessingLoginRef.current = false;
@@ -209,7 +210,7 @@ export default function LoginScreen() {
             
             if (isTimeout) {
                 console.error('[LoginScreen] ⚠️ Backend não está respondendo!');
-                console.error('[LoginScreen] Verifique se está rodando em: http://192.168.10.9:3000');
+                console.error('[LoginScreen] Verifique se está rodando em:', API_BASE_URL);
                 console.log('[LoginScreen] Redirecionando para seleção de role devido ao timeout');
                 router.replace('/select-role');
             } else if (isInternalServerError) {

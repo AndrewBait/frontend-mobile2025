@@ -14,9 +14,11 @@ import {
 } from 'react-native';
 import { GradientBackground } from '../../components/GradientBackground';
 import { Colors } from '../../constants/Colors';
+import { useCart } from '../../contexts/CartContext';
 import { api, Batch } from '../../services/api';
 
 export default function FavoritesScreen() {
+    const { incrementCartCount, updateCartCache } = useCart();
     const [favorites, setFavorites] = useState<Batch[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -66,10 +68,94 @@ export default function FavoritesScreen() {
     };
 
     const handleAddToCart = async (batch: Batch) => {
+        // ATUALIZAÇÃO OTIMISTA: Atualizar badge imediatamente
+        incrementCartCount(1);
+        
         try {
-            await api.addToCart(batch.id, 1);
-        } catch (error) {
-            console.error('Error adding to cart:', error);
+            const result = await api.addToCart(batch.id, 1);
+            
+            // Usar resposta diretamente para atualizar cache (evita requisição extra)
+            updateCartCache(result);
+            
+            Alert.alert(
+                '✅ Adicionado!',
+                'Produto adicionado ao carrinho.',
+                [{ text: 'OK' }]
+            );
+        } catch (error: any) {
+            // REVERTER atualização otimista em caso de erro
+            incrementCartCount(-1);
+            
+            const errorMessage = error?.message || 'Não foi possível adicionar ao carrinho.';
+            const statusCode = error?.status || error?.statusCode;
+            
+            // Verificar se é timeout ou erro de rede
+            const isNetworkError = 
+                errorMessage.includes('timeout') ||
+                errorMessage.includes('Timeout') ||
+                errorMessage.includes('Failed to fetch') ||
+                errorMessage.includes('Network request failed') ||
+                errorMessage.includes('NetworkError');
+            
+            if (isNetworkError) {
+                Alert.alert(
+                    '⚠️ Erro de Conexão',
+                    'Não foi possível conectar ao servidor. Verifique sua conexão com a internet e tente novamente.',
+                    [{ text: 'OK' }]
+                );
+                return;
+            }
+            
+            // Detectar erro 409 (Conflict) - carrinho de outra loja
+            const isDifferentStoreError = 
+                statusCode === 409 ||
+                errorMessage.includes('outra loja') || 
+                errorMessage.includes('carrinho aberto') ||
+                errorMessage.toLowerCase().includes('loja diferente');
+            
+            if (isDifferentStoreError) {
+                console.log('[Favorites] ✅ Erro 409 detectado - Carrinho de outra loja');
+                
+                Alert.alert(
+                    '🛒 Carrinho de Outra Loja',
+                    'Você já possui produtos de outra loja no carrinho. O que deseja fazer?',
+                    [
+                        { text: 'Cancelar', style: 'cancel' },
+                        { 
+                            text: 'Ver Carrinho Atual', 
+                            onPress: () => router.push('/(customer)/cart')
+                        },
+                        { 
+                            text: 'Substituir Carrinho', 
+                            style: 'destructive',
+                            onPress: async () => {
+                                try {
+                                    const result = await api.addToCart(batch.id, 1, true); // replaceCart=true
+                                    
+                                    // Usar resposta diretamente para atualizar cache
+                                    updateCartCache(result);
+                                    
+                                    Alert.alert(
+                                        '✅ Adicionado!',
+                                        'Carrinho substituído e produto adicionado com sucesso!',
+                                        [{ text: 'OK' }]
+                                    );
+                                } catch (replaceError: any) {
+                                    Alert.alert(
+                                        'Erro',
+                                        replaceError?.message || 'Não foi possível substituir o carrinho. Tente novamente.'
+                                    );
+                                }
+                            }
+                        },
+                    ]
+                );
+                return;
+            }
+            
+            // Outros erros
+            console.error('[Favorites] Erro ao adicionar ao carrinho:', errorMessage);
+            Alert.alert('Erro', errorMessage);
         }
     };
 

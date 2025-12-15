@@ -1,7 +1,7 @@
-import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import * as Device from 'expo-device';
+import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import { api } from './api';
 
 // Configure how notifications appear when the app is in foreground
 Notifications.setNotificationHandler({
@@ -54,9 +54,16 @@ class NotificationService {
             }
 
             // Get the Expo push token
-            const tokenData = await Notifications.getExpoPushTokenAsync({
-                projectId: 'your-project-id', // TODO: Replace with actual project ID from app.json
-            });
+            // Use projectId from expo-constants (automatically set by EAS Build)
+            const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+            
+            if (!projectId) {
+                console.warn('Project ID not found. Push notifications may not work correctly. Make sure to build with EAS Build.');
+            }
+
+            const tokenData = await Notifications.getExpoPushTokenAsync(
+                projectId ? { projectId } : undefined
+            );
 
             this.expoPushToken = tokenData.data;
             console.log('Expo Push Token:', this.expoPushToken);
