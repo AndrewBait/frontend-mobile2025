@@ -1,22 +1,23 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import { GradientBackground } from '@/components/GradientBackground';
+import { SalesChart } from '@/components/SalesChart';
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { useAuth } from '@/contexts/AuthContext';
+import { api, Store } from '@/services/api';
+import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { router } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import {
-    StyleSheet,
-    View,
-    Text,
-    ScrollView,
-    TouchableOpacity,
     ActivityIndicator,
     RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import { router } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { GradientBackground } from '../../components/GradientBackground';
-import { SalesChart } from '../../components/SalesChart';
-import { Colors } from '../../constants/Colors';
-import { api, Store } from '../../services/api';
-import { useAuth } from '../../contexts/AuthContext';
 
 interface DailySale {
     date: string;
@@ -201,10 +202,10 @@ export default function MerchantDashboard() {
                         onPress={() => router.push('/(merchant)/create-product')}
                     >
                         <LinearGradient
-                            colors={[Colors.primary + '20', Colors.primary + '05']}
+                            colors={['rgba(5, 150, 105, 0.1)', 'rgba(5, 150, 105, 0.05)']}
                             style={styles.actionGradient}
                         >
-                            <View style={[styles.actionIcon, { backgroundColor: Colors.primary + '25' }]}>
+                            <View style={[styles.actionIcon, { backgroundColor: 'rgba(5, 150, 105, 0.15)' }]}>
                                 <Ionicons name="add-circle" size={28} color={Colors.primary} />
                             </View>
                             <Text style={styles.actionTitle}>Novo Produto</Text>
@@ -217,10 +218,10 @@ export default function MerchantDashboard() {
                         onPress={() => router.push('/(merchant)/sales')}
                     >
                         <LinearGradient
-                            colors={[Colors.warning + '20', Colors.warning + '05']}
+                            colors={['rgba(251, 146, 60, 0.1)', 'rgba(251, 146, 60, 0.05)']}
                             style={styles.actionGradient}
                         >
-                            <View style={[styles.actionIcon, { backgroundColor: Colors.warning + '25' }]}>
+                            <View style={[styles.actionIcon, { backgroundColor: 'rgba(251, 146, 60, 0.15)' }]}>
                                 <Ionicons name="qr-code" size={28} color={Colors.warning} />
                             </View>
                             <Text style={styles.actionTitle}>Retirada</Text>
@@ -233,11 +234,11 @@ export default function MerchantDashboard() {
                         onPress={() => router.push('/(merchant)/products')}
                     >
                         <LinearGradient
-                            colors={[Colors.secondary + '20', Colors.secondary + '05']}
+                            colors={['rgba(5, 150, 105, 0.1)', 'rgba(16, 185, 129, 0.05)']}
                             style={styles.actionGradient}
                         >
-                            <View style={[styles.actionIcon, { backgroundColor: Colors.secondary + '25' }]}>
-                                <Ionicons name="cube" size={28} color={Colors.secondary} />
+                            <View style={[styles.actionIcon, { backgroundColor: 'rgba(5, 150, 105, 0.15)' }]}>
+                                <Ionicons name="cube" size={28} color={Colors.primary} />
                             </View>
                             <Text style={styles.actionTitle}>Produtos</Text>
                             <Text style={styles.actionDesc}>Gerenciar estoque</Text>
@@ -249,11 +250,11 @@ export default function MerchantDashboard() {
                         onPress={() => router.push('/(merchant)/stores')}
                     >
                         <LinearGradient
-                            colors={[Colors.success + '20', Colors.success + '05']}
+                            colors={['rgba(59, 130, 246, 0.1)', 'rgba(59, 130, 246, 0.05)']}
                             style={styles.actionGradient}
                         >
-                            <View style={[styles.actionIcon, { backgroundColor: Colors.success + '25' }]}>
-                                <Ionicons name="storefront" size={28} color={Colors.success} />
+                            <View style={[styles.actionIcon, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
+                                <Ionicons name="storefront" size={28} color="#3B82F6" />
                             </View>
                             <Text style={styles.actionTitle}>Lojas</Text>
                             <Text style={styles.actionDesc}>{stores.length} cadastrada(s)</Text>
@@ -346,156 +347,165 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: 24,
-        marginBottom: 24,
+        paddingHorizontal: DesignTokens.padding.medium,
+        marginBottom: DesignTokens.spacing.xl,
     },
     greeting: {
-        fontSize: 14,
+        fontSize: 15,
+        fontWeight: '500',
         color: Colors.textSecondary,
         marginBottom: 4,
     },
     title: {
-        fontSize: 28,
-        fontWeight: '700',
+        fontSize: 30,
+        fontWeight: '800',
         color: Colors.text,
+        letterSpacing: -0.5,
     },
     notificationButton: {
-        width: 48,
-        height: 48,
-        borderRadius: 14,
-        backgroundColor: Colors.glass,
-        borderWidth: 1,
-        borderColor: Colors.glassBorder,
+        width: 52,
+        height: 52,
+        borderRadius: DesignTokens.borderRadius.xl,
+        backgroundColor: Colors.backgroundLight,
+        borderWidth: 1.5,
+        borderColor: Colors.border,
         alignItems: 'center',
         justifyContent: 'center',
+        ...DesignTokens.shadows.sm,
     },
     badge: {
         position: 'absolute',
-        top: -4,
-        right: -4,
+        top: -6,
+        right: -6,
         backgroundColor: Colors.error,
-        borderRadius: 10,
-        minWidth: 20,
-        height: 20,
+        borderRadius: 12,
+        minWidth: 22,
+        height: 22,
         alignItems: 'center',
         justifyContent: 'center',
         paddingHorizontal: 6,
+        borderWidth: 2,
+        borderColor: Colors.background,
     },
     badgeText: {
-        color: Colors.text,
+        color: '#FFFFFF',
         fontSize: 11,
-        fontWeight: '700',
+        fontWeight: '800',
     },
     statsRow: {
         flexDirection: 'row',
-        paddingHorizontal: 24,
+        paddingHorizontal: DesignTokens.padding.medium,
         gap: 12,
         marginBottom: 12,
     },
     statCard: {
         flex: 1,
-        padding: 16,
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: Colors.glassBorder,
+        padding: 20,
+        borderRadius: DesignTokens.borderRadius.xl,
+        ...DesignTokens.shadows.md,
     },
     statCardPrimary: {
-        backgroundColor: Colors.success + '10',
+        backgroundColor: '#ECFDF5',
     },
     statCardSecondary: {
-        backgroundColor: Colors.primary + '10',
+        backgroundColor: '#EFF6FF',
     },
     statCardWarning: {
-        backgroundColor: Colors.warning + '10',
+        backgroundColor: '#FFFBEB',
     },
     statCardError: {
-        backgroundColor: Colors.error + '10',
+        backgroundColor: '#FEF2F2',
     },
     statValue: {
-        fontSize: 24,
-        fontWeight: '700',
+        fontSize: 32,
+        fontWeight: '800',
         color: Colors.text,
-        marginTop: 8,
+        marginTop: 10,
+        letterSpacing: -1,
     },
     statLabel: {
-        fontSize: 12,
+        fontSize: 13,
+        fontWeight: '500',
         color: Colors.textSecondary,
         marginTop: 4,
     },
     sectionTitle: {
-        fontSize: 18,
+        fontSize: 20,
         fontWeight: '700',
         color: Colors.text,
-        paddingHorizontal: 24,
-        marginTop: 24,
-        marginBottom: 16,
+        paddingHorizontal: DesignTokens.padding.medium,
+        marginTop: DesignTokens.spacing.xl,
+        marginBottom: DesignTokens.spacing.md,
     },
     actionsGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        paddingHorizontal: 24,
+        paddingHorizontal: DesignTokens.padding.medium,
         gap: 12,
     },
     actionCard: {
         width: '47%',
-        borderRadius: 16,
+        borderRadius: DesignTokens.borderRadius.xl,
         overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: Colors.glassBorder,
+        backgroundColor: Colors.backgroundLight,
+        ...DesignTokens.shadows.md,
     },
     actionGradient: {
-        padding: 16,
+        padding: 20,
         alignItems: 'center',
     },
     actionIcon: {
         width: 56,
         height: 56,
-        borderRadius: 16,
+        borderRadius: DesignTokens.borderRadius.lg,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 12,
     },
     actionTitle: {
-        fontSize: 14,
-        fontWeight: '600',
+        fontSize: 15,
+        fontWeight: '700',
         color: Colors.text,
-        marginBottom: 2,
+        marginBottom: 4,
+        textAlign: 'center',
     },
     actionDesc: {
         fontSize: 12,
         color: Colors.textSecondary,
+        textAlign: 'center',
     },
     warningCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginHorizontal: 24,
-        marginTop: 24,
+        marginHorizontal: DesignTokens.padding.medium,
+        marginTop: DesignTokens.spacing.xl,
         padding: 16,
-        backgroundColor: Colors.warning + '15',
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: Colors.warning + '30',
+        backgroundColor: '#FFFBEB',
+        borderRadius: DesignTokens.borderRadius.xl,
+        borderWidth: 1.5,
+        borderColor: Colors.warning,
         gap: 12,
+        ...DesignTokens.shadows.sm,
     },
     warningContent: {
         flex: 1,
     },
     warningTitle: {
-        fontSize: 14,
-        fontWeight: '600',
+        fontSize: 15,
+        fontWeight: '700',
         color: Colors.warning,
         marginBottom: 2,
     },
     warningText: {
-        fontSize: 12,
+        fontSize: 13,
         color: Colors.textSecondary,
     },
     expiringCard: {
-        backgroundColor: Colors.error + '15',
-        borderColor: Colors.error + '30',
+        backgroundColor: '#FEF2F2',
+        borderColor: Colors.error,
     },
     lowStockCard: {
-        backgroundColor: Colors.warning + '15',
-        borderColor: Colors.warning + '30',
+        backgroundColor: '#FFFBEB',
+        borderColor: Colors.warning,
     },
 });

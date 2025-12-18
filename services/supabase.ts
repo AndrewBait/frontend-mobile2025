@@ -1,6 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../constants/config';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '@/constants/config';
 
 // Custom storage that works on both web and native
 const createStorage = () => {
@@ -67,9 +67,34 @@ export const getSession = async () => {
     return session;
 };
 
+export const refreshAccessToken = async (): Promise<string | null> => {
+    try {
+        const { data, error } = await supabase.auth.refreshSession();
+        if (error) return null;
+        return data.session?.access_token || null;
+    } catch {
+        return null;
+    }
+};
+
 export const getAccessToken = async (): Promise<string | null> => {
-    const session = await getSession();
-    return session?.access_token || null;
+    const session: any = await getSession();
+    const accessToken = session?.access_token || null;
+
+    // Evita tokens inválidos vindos de cache/cópia (ex: valores com "…")
+    const hasNonAscii = typeof accessToken === 'string' && /[^\x00-\x7F]/.test(accessToken);
+    const hasEllipsis = typeof accessToken === 'string' && accessToken.includes('…');
+
+    const now = Math.floor(Date.now() / 1000);
+    const expiresAt = typeof session?.expires_at === 'number' ? session.expires_at : null;
+    const isExpiredOrNear = typeof expiresAt === 'number' ? expiresAt <= now + 30 : false;
+
+    if (!accessToken || hasNonAscii || hasEllipsis || isExpiredOrNear) {
+        const refreshed = await refreshAccessToken();
+        return refreshed || accessToken;
+    }
+
+    return accessToken;
 };
 
 export const getCurrentUser = async () => {

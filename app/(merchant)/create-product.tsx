@@ -1,37 +1,38 @@
-import React, { useState, useEffect } from 'react';
+import { GradientBackground } from '@/components/GradientBackground';
+import { SelectInput } from '@/components/SelectInput';
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { api, Store } from '@/services/api';
+import { uploadProductImage } from '@/services/storage';
 import {
-    StyleSheet,
-    View,
-    Text,
-    ScrollView,
-    TouchableOpacity,
-    TextInput,
-    KeyboardAvoidingView,
-    Platform,
-    Alert,
-    ActivityIndicator,
-    Image,
-    Modal,
-    Switch,
-} from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import * as ImagePicker from 'expo-image-picker';
-import { GradientBackground } from '../../components/GradientBackground';
-import { SelectInput } from '../../components/SelectInput';
-import { Colors } from '../../constants/Colors';
-import {
-    validateRequired,
-    validateMinLength,
-    validateMaxLength,
-    validateFutureDate,
-    sanitizeText,
     PRODUCT_CATEGORIES,
-} from '../../utils/validation';
-import { api, Store } from '../../services/api';
-import { uploadProductImage } from '../../services/storage';
+    sanitizeText,
+    validateFutureDate,
+    validateMaxLength,
+    validateMinLength,
+    validateRequired,
+} from '@/utils/validation';
+import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 
 interface FormErrors {
     name?: string;
@@ -602,7 +603,7 @@ export default function CreateProductScreen() {
                         <SelectInput
                             label="Loja"
                             value={selectedStore || ''}
-                            options={stores.map(s => ({ value: s.id, label: s.name }))}
+                            options={stores.map(s => ({ value: s.id, label: s.name || s.nome || 'Loja' }))}
                             onSelect={setSelectedStore}
                             placeholder="Selecione a loja..."
                             required
@@ -927,7 +928,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 20,
+        paddingHorizontal: DesignTokens.padding.medium, // Responsivo
         marginBottom: 20,
     },
     backButton: {
@@ -947,7 +948,7 @@ const styles = StyleSheet.create({
     },
     form: {
         flex: 1,
-        paddingHorizontal: 24,
+        paddingHorizontal: DesignTokens.padding.medium, // Responsivo
     },
     sectionTitle: {
         fontSize: 16,
@@ -1045,7 +1046,7 @@ const styles = StyleSheet.create({
     discountBadge: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: Colors.success + '15',
+        backgroundColor: Colors.success15,
         borderRadius: 12,
         padding: 12,
         marginBottom: 16,
@@ -1059,7 +1060,7 @@ const styles = StyleSheet.create({
     infoBox: {
         flexDirection: 'row',
         alignItems: 'flex-start',
-        backgroundColor: Colors.warning + '15',
+        backgroundColor: Colors.warning15,
         borderRadius: 12,
         padding: 12,
         marginBottom: 24,
@@ -1118,7 +1119,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: 20,
+        paddingHorizontal: DesignTokens.padding.medium, // Responsivo
         marginBottom: 16,
     },
     datePickerTitle: {

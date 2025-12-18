@@ -1,7 +1,7 @@
+import { api, User } from '@/services/api';
+import { getCurrentUser, getSession, supabase, signOut as supabaseSignOut } from '@/services/supabase';
 import { router } from 'expo-router';
 import React, { createContext, ReactNode, useContext, useEffect, useRef, useState } from 'react';
-import { api, User } from '../services/api';
-import { getCurrentUser, getSession, supabase, signOut as supabaseSignOut } from '../services/supabase';
 
 interface AuthContextType {
     user: User | null;
@@ -186,51 +186,29 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             isLoggingOutRef.current = true;
             setIsLoggingOut(true);
 
-            // Sign out from Supabase first (this will clear storage automatically)
-            console.log('[AuthContext] Fazendo signOut do Supabase...');
-            await supabaseSignOut();
-            console.log('[AuthContext] SignOut do Supabase concluído');
-
-            // Clear state after Supabase signOut
+            // Clear state FIRST (before Supabase signOut to avoid race conditions)
             console.log('[AuthContext] Limpando estado local...');
             setUser(null);
             setSession(null);
 
+            // Sign out from Supabase (this will clear storage automatically)
+            console.log('[AuthContext] Fazendo signOut do Supabase...');
+            await supabaseSignOut();
+            console.log('[AuthContext] SignOut do Supabase concluído');
+
             // Wait a tiny bit to ensure state is cleared
             await new Promise(resolve => setTimeout(resolve, 100));
 
-            // Immediately redirect to login screen
-            console.log('🔴 [AuthContext] Redirecionando para tela de login (/)...');
-            console.log('🔴 [AuthContext] Estado atual após limpeza:', {
-                user: 'null',
-                session: 'null',
-                isLoggingOut
-            });
-            
-            // Use router.dismissAll() first to clear navigation stack, then navigate to login
-            console.log('🔴 [AuthContext] Limpando pilha de navegação...');
-            try {
-                router.dismissAll();
-                await new Promise(resolve => setTimeout(resolve, 50));
-            } catch (e) {
-                console.log('🔴 [AuthContext] dismissAll não disponível ou erro:', e);
-            }
-            
-            console.log('🔴 [AuthContext] Navegando para /...');
+            // Navigate to login screen using replace (don't use dismissAll - causes POP_TO_TOP error)
+            console.log('[AuthContext] Navegando para /...');
             router.replace('/');
-            console.log('🔴 [AuthContext] router.replace("/") concluído');
-            
-            // Force a delay to ensure navigation completes and UI updates
-            await new Promise(resolve => setTimeout(resolve, 300));
-            
-            console.log('🔴 [AuthContext] ✅ Logout concluído - LoginScreen deve estar visível agora');
+            console.log('[AuthContext] ✅ Logout concluído - LoginScreen deve estar visível agora');
         } catch (error: any) {
             console.error('[AuthContext] Erro durante logout:', error);
             // Still clear state even if signOut fails
             setUser(null);
             setSession(null);
             // Still redirect to login even on error
-            console.log('[AuthContext] Tentando redirecionar mesmo com erro...');
             try {
                 router.replace('/');
             } catch (navError) {
@@ -242,7 +220,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                 console.log('[AuthContext] Resetando flag de logout');
                 isLoggingOutRef.current = false;
                 setIsLoggingOut(false);
-            }, 1500);
+            }, 500);
         }
     };
 

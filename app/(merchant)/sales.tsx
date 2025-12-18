@@ -1,24 +1,33 @@
-import React, { useState, useCallback, useEffect } from 'react';
-import {
-    StyleSheet,
-    View,
-    Text,
-    FlatList,
-    TouchableOpacity,
-    TextInput,
-    ActivityIndicator,
-    RefreshControl,
-    Alert,
-} from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { AdaptiveList } from '@/components/base/AdaptiveList';
+import { Badge } from '@/components/base/Badge';
+import { Button } from '@/components/base/Button';
+import { Input } from '@/components/base/Input';
+import { EmptyState } from '@/components/feedback/EmptyState';
+import { GradientBackground } from '@/components/GradientBackground';
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { useAuth } from '@/contexts/AuthContext';
+import { api, Order, Store } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { GradientBackground } from '../../components/GradientBackground';
-import { Colors } from '../../constants/Colors';
-import { api, Store, Order } from '../../services/api';
-import { useAuth } from '../../contexts/AuthContext';
+import { useFocusEffect } from '@react-navigation/native';
+import * as Haptics from 'expo-haptics';
+import { router } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function MerchantSalesScreen() {
+    const insets = useSafeAreaInsets();
+    const screenPaddingTop = insets.top + DesignTokens.spacing.md;
     const { session, isLoggingOut } = useAuth();
     const [stores, setStores] = useState<Store[]>([]);
     const [orders, setOrders] = useState<Order[]>([]);
@@ -27,6 +36,7 @@ export default function MerchantSalesScreen() {
     const [verifying, setVerifying] = useState(false);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'pending_payment' | 'picked_up' | 'cancelled'>('paid');
 
     useFocusEffect(
         useCallback(() => {
@@ -93,8 +103,11 @@ export default function MerchantSalesScreen() {
 
         setVerifying(true);
         try {
+            const normalizedInput = pickupCode.trim().toUpperCase();
+            const fullCode = normalizedInput.startsWith('VEN-') ? normalizedInput : `VEN-${normalizedInput}`;
+
             // Find order with this pickup code
-            const order = orders.find(o => o.pickup_code === pickupCode.toUpperCase());
+            const order = orders.find(o => (o.pickup_code || '').toUpperCase() === fullCode);
 
             if (!order) {
                 Alert.alert('❌ Código Inválido', 'Nenhum pedido encontrado com este código.');
@@ -114,8 +127,9 @@ export default function MerchantSalesScreen() {
                 return;
             }
 
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             // Confirm pickup
-            await api.confirmPickup(selectedStore, order.id);
+            await api.confirmPickup(selectedStore, order.id, fullCode);
 
             Alert.alert(
                 '✅ Retirada Confirmada!',
@@ -135,60 +149,91 @@ export default function MerchantSalesScreen() {
 
     const getStatusInfo = (status: string) => {
         switch (status) {
+            case 'pending_payment':
             case 'pending':
-                return { label: 'Aguardando', color: Colors.warning };
+                return { label: 'Aguardando', variant: 'warning' as const, icon: 'time' as const };
             case 'paid':
-                return { label: 'A Retirar', color: Colors.success };
+                return { label: 'A retirar', variant: 'success' as const, icon: 'checkmark-circle' as const };
             case 'picked_up':
-                return { label: 'Retirado', color: Colors.primary };
+                return { label: 'Retirado', variant: 'primary' as const, icon: 'bag-check' as const };
             case 'cancelled':
-                return { label: 'Cancelado', color: Colors.error };
-            case 'expired':
-                return { label: 'Expirado', color: Colors.textMuted };
+                return { label: 'Cancelado', variant: 'error' as const, icon: 'close-circle' as const };
             default:
-                return { label: 'Desconhecido', color: Colors.textMuted };
+                return { label: 'Status', variant: 'default' as const, icon: 'help-circle' as const };
         }
     };
 
     const renderOrder = ({ item }: { item: Order }) => {
         const statusInfo = getStatusInfo(item.status);
+        const customerName = item.customer?.name || item.customer?.email || 'Cliente';
+        const storeName = stores.find(s => s.id === selectedStore)?.name || stores.find(s => s.id === selectedStore)?.nome || 'Loja';
+        const itemCount = item.items?.length || 0;
+        const totalQty = (item.items || []).reduce((sum, it) => sum + (it.quantity || 0), 0);
 
         return (
-            <View style={styles.orderCard}>
+            <TouchableOpacity
+                style={styles.orderCard}
+                activeOpacity={0.9}
+                onPress={() => {
+                    if (!selectedStore) return;
+                    router.push({
+                        pathname: '/(merchant)/sale-order/[id]',
+                        params: { id: item.id, storeId: selectedStore },
+                    });
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`Pedido ${item.id.slice(-6).toUpperCase()} • ${statusInfo.label}`}
+                accessibilityHint="Toque para ver detalhes e confirmar retirada"
+            >
                 <View style={styles.orderHeader}>
-                    <View>
+                    <View style={{ flex: 1 }}>
                         <Text style={styles.orderNumber}>#{item.id.slice(-6).toUpperCase()}</Text>
+                        <Text style={styles.orderSub}>{customerName} • {storeName}</Text>
                         <Text style={styles.orderDate}>
-                            {new Date(item.created_at || '').toLocaleString('pt-BR')}
+                            {item.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '—'}
                         </Text>
                     </View>
-                    <View style={[styles.statusBadge, { backgroundColor: statusInfo.color + '20' }]}>
-                        <Text style={[styles.statusText, { color: statusInfo.color }]}>
-                            {statusInfo.label}
-                        </Text>
+                    <View style={styles.orderHeaderRight}>
+                        <Badge
+                            label={statusInfo.label}
+                            variant={statusInfo.variant}
+                            size="sm"
+                            icon={statusInfo.icon}
+                        />
+                        <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
                     </View>
                 </View>
 
                 <View style={styles.orderBody}>
-                    <View style={styles.orderRow}>
-                        <Text style={styles.orderLabel}>Itens</Text>
-                        <Text style={styles.orderValue}>{item.items?.length || 0}</Text>
+                    <View style={styles.orderStatRow}>
+                        <Ionicons name="cube" size={16} color={Colors.textMuted} />
+                        <Text style={styles.orderStatText}>{itemCount} item(ns) • {totalQty} un.</Text>
                     </View>
-                    <View style={styles.orderRow}>
-                        <Text style={styles.orderLabel}>Total</Text>
-                        <Text style={styles.orderTotal}>R$ {item.total_amount.toFixed(2)}</Text>
+                    <View style={styles.orderStatRow}>
+                        <Ionicons name="cash" size={16} color={Colors.textMuted} />
+                        <Text style={styles.orderTotal}>R$ {item.total.toFixed(2).replace('.', ',')}</Text>
                     </View>
                 </View>
 
-                {item.status === 'paid' && item.pickup_code && (
+                {item.status === 'paid' && item.pickup_code ? (
                     <View style={styles.codeBox}>
-                        <Text style={styles.codeLabel}>Código</Text>
+                        <Ionicons name="key" size={18} color={Colors.success} />
                         <Text style={styles.codeValue}>{item.pickup_code}</Text>
+                        <Text style={styles.codeHint}>Retirada pendente</Text>
                     </View>
-                )}
-            </View>
+                ) : null}
+            </TouchableOpacity>
         );
     };
+
+    const pendingOrders = useMemo(() => orders.filter((o) => o.status === 'paid'), [orders]);
+    const filteredOrders = useMemo(() => {
+        if (statusFilter === 'all') return orders;
+        if (statusFilter === 'pending_payment') {
+            return orders.filter((o) => o.status === 'pending_payment' || o.status === 'pending');
+        }
+        return orders.filter((o) => o.status === statusFilter);
+    }, [orders, statusFilter]);
 
     if (loading) {
         return (
@@ -211,14 +256,12 @@ export default function MerchantSalesScreen() {
         );
     }
 
-    const pendingOrders = orders.filter(o => o.status === 'paid');
-
     return (
         <GradientBackground>
-            <View style={styles.container}>
+            <View style={[styles.container, { paddingTop: screenPaddingTop }]}>
                 {/* Header */}
                 <View style={styles.header}>
-                    <Text style={styles.title}>Vendas</Text>
+                    <Text style={styles.title}>Pedidos</Text>
                     <Text style={styles.subtitle}>
                         {pendingOrders.length} retirada(s) pendente(s)
                     </Text>
@@ -227,77 +270,105 @@ export default function MerchantSalesScreen() {
                 {/* Pickup Code Verifier */}
                 <View style={styles.verifyCard}>
                     <View style={styles.verifyHeader}>
-                        <Ionicons name="qr-code" size={24} color={Colors.secondary} />
-                        <Text style={styles.verifyTitle}>Verificar Retirada</Text>
+                        <Ionicons name="qr-code" size={22} color={Colors.secondary} />
+                        <Text style={styles.verifyTitle}>Confirmar retirada</Text>
                     </View>
-                    <View style={styles.verifyInputRow}>
-                        <TextInput
-                            style={styles.verifyInput}
-                            value={pickupCode}
-                            onChangeText={(text) => setPickupCode(text.toUpperCase())}
-                            placeholder="Código de retirada"
-                            placeholderTextColor={Colors.textMuted}
-                            autoCapitalize="characters"
-                            maxLength={6}
-                        />
-                        <TouchableOpacity
-                            onPress={handleVerifyPickup}
-                            disabled={verifying || !pickupCode.trim()}
-                        >
-                            <LinearGradient
-                                colors={[Colors.secondary, Colors.secondaryDark]}
-                                style={styles.verifyButton}
-                            >
-                                {verifying ? (
-                                    <ActivityIndicator color={Colors.text} size="small" />
-                                ) : (
-                                    <Ionicons name="checkmark" size={24} color={Colors.text} />
-                                )}
-                            </LinearGradient>
-                        </TouchableOpacity>
-                    </View>
+                    <Input
+                        value={pickupCode}
+                        onChangeText={(text) => setPickupCode(text.toUpperCase())}
+                        label="Código de retirada"
+                        placeholder="VEN-XXXXXX"
+                        autoCapitalize="characters"
+                        autoCorrect={false}
+                        maxLength={12}
+                        leftIcon="key"
+                        floatingLabel
+                        containerStyle={{ marginBottom: DesignTokens.spacing.sm }}
+                    />
+                    <Button
+                        title="Confirmar"
+                        onPress={handleVerifyPickup}
+                        variant="secondary"
+                        size="md"
+                        loading={verifying}
+                        leftIcon={!verifying ? <Ionicons name="checkmark" size={20} color={Colors.text} /> : undefined}
+                        fullWidth
+                        disabled={!pickupCode.trim()}
+                    />
                 </View>
 
                 {/* Store Filter */}
                 {stores.length > 1 && (
-                    <FlatList
-                        data={stores}
-                        renderItem={({ item }) => (
-                            <TouchableOpacity
-                                style={[
-                                    styles.storeChip,
-                                    selectedStore === item.id && styles.storeChipActive,
-                                ]}
-                                onPress={() => setSelectedStore(item.id)}
-                            >
-                                <Text style={[
-                                    styles.storeChipText,
-                                    selectedStore === item.id && styles.storeChipTextActive,
-                                ]}>
-                                    {item.name}
-                                </Text>
-                            </TouchableOpacity>
-                        )}
-                        keyExtractor={(item) => item.id}
+                    <ScrollView
                         horizontal
                         showsHorizontalScrollIndicator={false}
                         contentContainerStyle={styles.storesFilter}
-                    />
+                    >
+                        {stores.map((store) => {
+                            const isActive = selectedStore === store.id;
+                            return (
+                                <TouchableOpacity
+                                    key={store.id}
+                                    style={[styles.storeChip, isActive && styles.storeChipActive]}
+                                    onPress={() => setSelectedStore(store.id)}
+                                    activeOpacity={0.9}
+                                >
+                                    <Text style={[styles.storeChipText, isActive && styles.storeChipTextActive]}>
+                                        {store.name || store.nome || 'Loja'}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
                 )}
 
+                {/* Status filter - Tabs Horizontais */}
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.filtersRow}
+                >
+                    {([
+                        { key: 'paid', label: 'A retirar' },
+                        { key: 'pending_payment', label: 'Aguardando' },
+                        { key: 'picked_up', label: 'Retirado' },
+                        { key: 'cancelled', label: 'Cancelado' },
+                        { key: 'all', label: 'Todos' },
+                    ] as const).map((f) => {
+                        const active = statusFilter === f.key;
+                        return (
+                            <TouchableOpacity
+                                key={f.key}
+                                style={[styles.filterTab, active && styles.filterTabActive]}
+                                onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                    setStatusFilter(f.key);
+                                }}
+                                activeOpacity={0.7}
+                            >
+                                <Text style={[styles.filterTabText, active && styles.filterTabTextActive]}>
+                                    {f.label}
+                                </Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </ScrollView>
+
                 {/* Orders List */}
-                {orders.length === 0 ? (
-                    <View style={styles.emptyListContainer}>
-                        <Ionicons name="receipt-outline" size={48} color={Colors.textMuted} />
-                        <Text style={styles.emptyListText}>Nenhuma venda ainda</Text>
-                    </View>
+                {filteredOrders.length === 0 ? (
+                    <EmptyState
+                        icon="receipt-outline"
+                        title="Nenhum pedido por aqui"
+                        message="Quando um cliente comprar, os pedidos aparecem aqui."
+                    />
                 ) : (
-                    <FlatList
-                        data={orders}
+                    <AdaptiveList
+                        data={filteredOrders}
                         renderItem={renderOrder}
                         keyExtractor={(item) => item.id}
                         contentContainerStyle={styles.listContent}
                         showsVerticalScrollIndicator={false}
+                        estimatedItemSize={156}
                         refreshControl={
                             <RefreshControl
                                 refreshing={refreshing}
@@ -315,7 +386,6 @@ export default function MerchantSalesScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        paddingTop: 60,
     },
     loadingContainer: {
         flex: 1,
@@ -334,16 +404,15 @@ const styles = StyleSheet.create({
         marginTop: 16,
     },
     header: {
-        paddingHorizontal: 24,
-        marginBottom: 20,
+        paddingHorizontal: DesignTokens.padding.medium, // Responsivo
+        marginBottom: DesignTokens.spacing.lg,
     },
     title: {
-        fontSize: 28,
-        fontWeight: '700',
+        ...DesignTokens.typography.h1,
         color: Colors.text,
     },
     subtitle: {
-        fontSize: 14,
+        ...DesignTokens.typography.small,
         color: Colors.textSecondary,
     },
     verifyCard: {
@@ -359,37 +428,11 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 8,
-        marginBottom: 12,
+        marginBottom: 8,
     },
     verifyTitle: {
-        fontSize: 16,
-        fontWeight: '600',
+        ...DesignTokens.typography.bodyBold,
         color: Colors.text,
-    },
-    verifyInputRow: {
-        flexDirection: 'row',
-        gap: 12,
-    },
-    verifyInput: {
-        flex: 1,
-        backgroundColor: Colors.glass,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: Colors.glassBorder,
-        paddingHorizontal: 16,
-        paddingVertical: 14,
-        fontSize: 18,
-        fontWeight: '600',
-        color: Colors.text,
-        letterSpacing: 2,
-        textAlign: 'center',
-    },
-    verifyButton: {
-        width: 52,
-        height: 52,
-        borderRadius: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
     },
     storesFilter: {
         paddingHorizontal: 24,
@@ -417,17 +460,45 @@ const styles = StyleSheet.create({
         color: Colors.text,
         fontWeight: '600',
     },
+    filtersRow: {
+        paddingHorizontal: DesignTokens.padding.medium, // Responsivo
+        paddingBottom: DesignTokens.spacing.sm,
+        gap: DesignTokens.spacing.xs,
+    },
+    filterTab: {
+        paddingHorizontal: DesignTokens.spacing.lg, // 20px conforme plano
+        paddingVertical: DesignTokens.spacing.md, // 48px altura conforme plano
+        borderRadius: DesignTokens.borderRadius.md,
+        backgroundColor: Colors.backgroundLight, // #FFFFFF
+        borderWidth: 1.5,
+        borderColor: Colors.border,
+        minHeight: 48, // Altura conforme plano
+    },
+    filterTabActive: {
+        backgroundColor: Colors.primary, // Verde conforme plano
+        borderColor: Colors.primary,
+        ...DesignTokens.shadows.sm,
+    },
+    filterTabText: {
+        ...DesignTokens.typography.bodyBold,
+        color: Colors.textSecondary,
+    },
+    filterTabTextActive: {
+        color: '#FFFFFF', // Texto branco no tab ativo
+        fontWeight: '700',
+    },
     listContent: {
-        paddingHorizontal: 24,
-        paddingBottom: 100,
+        paddingHorizontal: DesignTokens.padding.medium, // Responsivo
+        paddingBottom: DesignTokens.spacing.xxl,
     },
     orderCard: {
         backgroundColor: Colors.backgroundCard,
-        borderRadius: 16,
+        borderRadius: DesignTokens.borderRadius.lg,
         borderWidth: 1,
         borderColor: Colors.glassBorder,
-        padding: 16,
+        padding: DesignTokens.spacing.md,
         marginBottom: 12,
+        ...DesignTokens.shadows.sm,
     },
     orderHeader: {
         flexDirection: 'row',
@@ -441,53 +512,43 @@ const styles = StyleSheet.create({
         color: Colors.text,
         marginBottom: 4,
     },
+    orderSub: {
+        ...DesignTokens.typography.small,
+        color: Colors.textSecondary,
+        marginBottom: 4,
+    },
     orderDate: {
-        fontSize: 12,
+        ...DesignTokens.typography.caption,
         color: Colors.textMuted,
     },
-    statusBadge: {
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 8,
-    },
-    statusText: {
-        fontSize: 12,
-        fontWeight: '600',
+    orderHeaderRight: {
+        alignItems: 'flex-end',
+        gap: 10,
     },
     orderBody: {
-        gap: 8,
+        gap: 10,
     },
-    orderRow: {
+    orderStatRow: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
+        gap: 10,
     },
-    orderLabel: {
-        fontSize: 14,
+    orderStatText: {
+        ...DesignTokens.typography.small,
         color: Colors.textSecondary,
     },
-    orderValue: {
-        fontSize: 14,
-        fontWeight: '500',
-        color: Colors.text,
-    },
     orderTotal: {
-        fontSize: 16,
-        fontWeight: '700',
+        ...DesignTokens.typography.bodyBold,
         color: Colors.success,
     },
     codeBox: {
         marginTop: 16,
-        backgroundColor: Colors.success + '15',
+        backgroundColor: Colors.success15,
         borderRadius: 12,
         padding: 12,
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
-    },
-    codeLabel: {
-        fontSize: 12,
-        color: Colors.success,
+        gap: 10,
     },
     codeValue: {
         fontSize: 18,
@@ -495,14 +556,9 @@ const styles = StyleSheet.create({
         color: Colors.success,
         letterSpacing: 2,
     },
-    emptyListContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    emptyListText: {
-        fontSize: 16,
-        color: Colors.textSecondary,
-        marginTop: 16,
+    codeHint: {
+        ...DesignTokens.typography.captionBold,
+        color: Colors.success,
+        marginLeft: 'auto',
     },
 });

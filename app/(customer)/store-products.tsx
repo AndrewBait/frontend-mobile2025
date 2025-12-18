@@ -14,15 +14,20 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { GradientBackground } from '../../components/GradientBackground';
-import { Colors } from '../../constants/Colors';
-import { useAuth } from '../../contexts/AuthContext';
-import { api, Batch, Store } from '../../services/api';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GradientBackground } from '@/components/GradientBackground';
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { useAuth } from '@/contexts/AuthContext';
+import { api, Batch, Store } from '@/services/api';
 
 export default function StoreProductsScreen() {
     const { storeId } = useLocalSearchParams<{ storeId?: string }>();
     const router = useRouter();
     const { user } = useAuth();
+    const insets = useSafeAreaInsets();
+    const screenPaddingTop = insets.top + DesignTokens.spacing.md;
+    const containerStyle = [styles.container, { paddingTop: screenPaddingTop }];
     const [store, setStore] = useState<Store | null>(null);
     const [batches, setBatches] = useState<Batch[]>([]);
     const [allStores, setAllStores] = useState<Store[]>([]); // Todas as lojas carregadas
@@ -455,7 +460,7 @@ export default function StoreProductsScreen() {
     if (loading) {
         return (
             <GradientBackground>
-                <View style={styles.container}>
+                <View style={containerStyle}>
                     <View style={styles.header}>
                         {viewMode === 'store' && (
                             <TouchableOpacity
@@ -481,7 +486,7 @@ export default function StoreProductsScreen() {
     if (viewMode === 'list') {
         return (
             <GradientBackground>
-                <View style={styles.container}>
+                <View style={containerStyle}>
                     <View style={styles.header}>
                         <Text style={styles.headerTitle}>Lojas Disponíveis</Text>
                     </View>
@@ -677,7 +682,7 @@ export default function StoreProductsScreen() {
     if (!store) {
         return (
             <GradientBackground>
-                <View style={styles.container}>
+                <View style={containerStyle}>
                     <View style={styles.header}>
                         <TouchableOpacity
                             style={styles.backButton}
@@ -698,7 +703,7 @@ export default function StoreProductsScreen() {
 
     return (
         <GradientBackground>
-            <View style={styles.container}>
+            <View style={containerStyle}>
                 {/* Header */}
                 <View style={styles.header}>
                     <TouchableOpacity
@@ -795,7 +800,6 @@ export default function StoreProductsScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        paddingTop: 50,
     },
     header: {
         flexDirection: 'row',
@@ -805,8 +809,7 @@ const styles = StyleSheet.create({
         gap: 12,
     },
     headerTitle: {
-        fontSize: 20,
-        fontWeight: '700',
+        ...DesignTokens.typography.h3,
         color: Colors.text,
         flex: 1,
     },
@@ -1157,21 +1160,17 @@ const styles = StyleSheet.create({
         backgroundColor: 'transparent',
     },
     filterButtonActive: {
-        backgroundColor: Colors.primary + '20',
+        backgroundColor: Colors.primary20,
     },
     filtersContainer: {
         backgroundColor: Colors.backgroundCard,
-        borderRadius: 16,
+        borderRadius: DesignTokens.borderRadius.xl,
         padding: 18,
         marginHorizontal: 20,
         marginBottom: 16,
         borderWidth: 1.5,
         borderColor: Colors.glassBorder,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 3,
+        ...DesignTokens.shadows.md,
     },
     filterSection: {
         marginBottom: 20,

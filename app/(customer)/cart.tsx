@@ -1,39 +1,43 @@
+import { AdaptiveList } from '@/components/base/AdaptiveList';
+import { Button } from '@/components/base/Button';
+import { EmptyState } from '@/components/feedback/EmptyState';
+import { GradientBackground } from '@/components/GradientBackground';
+import { ProfileRequiredModal } from '@/components/ProfileRequiredModal';
+import { StickyFooter } from '@/components/StickyFooter';
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { useAuth } from '@/contexts/AuthContext';
+import { useCart } from '@/contexts/CartContext';
+import { api, Batch, Cart, CartItem, MultiCart } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
-    FlatList,
-    Image,
-    ImageErrorEventData,
-    NativeSyntheticEvent,
     RefreshControl,
     StyleSheet,
     Text,
     TouchableOpacity,
     View
 } from 'react-native';
-import { Button } from '../../components/base/Button';
-import { EmptyState } from '../../components/feedback/EmptyState';
-import { GradientBackground } from '../../components/GradientBackground';
-import { ProfileRequiredModal } from '../../components/ProfileRequiredModal';
-import { Colors } from '../../constants/Colors';
-import { DesignTokens } from '../../constants/designTokens';
-import { useAuth } from '../../contexts/AuthContext';
-import { useCart } from '../../contexts/CartContext';
-import { api, Cart, CartItem } from '../../services/api';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface GroupedCart {
     storeId: string;
     storeName: string;
+    storeAddress?: string;
+    storeLogo?: string;
     items: CartItem[];
     total: number;
 }
 
 export default function CartScreen() {
+    const insets = useSafeAreaInsets();
+    const screenPaddingTop = insets.top + DesignTokens.spacing.md;
     const { isProfileComplete } = useAuth();
     const { updateCartCache, getCachedCart, cacheTimestamp } = useCart();
     const [groupedCart, setGroupedCart] = useState<GroupedCart[]>([]);
@@ -43,49 +47,87 @@ export default function CartScreen() {
     const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
     const isLoadingCartRef = React.useRef(false);
 
-    // Função auxiliar para processar dados do carrinho
-    const processCartData = useCallback((cart: Cart) => {
-        // Ensure cart has items array
-        if (!cart || !Array.isArray(cart.items)) {
+    // Helper para normalizar os dados (Padrão Adapter)
+    const getBatchFromItem = (item: CartItem): Batch | null => {
+        return item.batch || item.product_batches || null;
+    };
+
+    // Helper para verificar se é MultiCart
+    const isMultiCart = (cart: Cart | MultiCart): cart is MultiCart => {
+        return 'carts' in cart && Array.isArray(cart.carts);
+    };
+
+    // Função auxiliar para processar dados do carrinho (suporta Cart e MultiCart)
+    const processCartData = useCallback((cartData: Cart | MultiCart) => {
+        if (!cartData) {
             console.log('Cart is empty or invalid, setting empty cart');
             setGroupedCart([]);
             return;
         }
 
-        // Group by store
-        const grouped: Record<string, GroupedCart> = {};
+        const grouped: GroupedCart[] = [];
 
-        (cart.items || []).forEach((item) => {
-            // Skip invalid items - check both batch and product_batches (backend format)
-            const batch = item.batch || item.product_batches;
-            if (!item || !batch) {
-                console.warn('Skipping invalid cart item:', item);
+        // Se é MultiCart (múltiplos carrinhos de lojas diferentes)
+        if (isMultiCart(cartData)) {
+            console.log('[Cart] Processing MultiCart with', cartData.carts.length, 'carts');
+            
+            cartData.carts.forEach((cart) => {
+                if (!cart.items || cart.items.length === 0) return;
+                
+                const storeData = cart.store || cart.stores;
+                grouped.push({
+                    storeId: cart.store_id || cart.id || '',
+                    storeName: storeData?.name || storeData?.nome || 'Loja',
+                    storeAddress: storeData?.address || storeData?.endereco,
+                    storeLogo: storeData?.logo_url,
+                    items: cart.items,
+                    total: cart.total || cart.items.reduce((sum, item) => {
+                        const batch = getBatchFromItem(item);
+                        const promoPrice = batch?.promo_price || batch?.preco_promocional || 0;
+                        return sum + (promoPrice * item.quantity);
+                    }, 0),
+                });
+            });
+        } else {
+            // Cart único - agrupar por loja (compatibilidade com formato antigo)
+            if (!Array.isArray(cartData.items) || cartData.items.length === 0) {
+                setGroupedCart([]);
                 return;
             }
 
-            // Handle both frontend format (batch) and backend format (product_batches)
-            const storeId = batch.store_id || '';
-            const store = batch.store || {};
-            const storeName = store.name || store.nome || 'Loja';
-            const promoPrice = batch.promo_price || batch.preco_promocional || 0;
+            const groupedByStore: Record<string, GroupedCart> = {};
 
-            if (!grouped[storeId]) {
-                grouped[storeId] = {
-                    storeId,
-                    storeName,
-                    items: [],
-                    total: 0,
-                };
-            }
+            cartData.items.forEach((item) => {
+                const batch = getBatchFromItem(item);
+                if (!item || !batch) return;
 
-            grouped[storeId].items.push(item);
-            grouped[storeId].total += promoPrice * item.quantity;
-        });
+                const storeId = batch.store_id || '';
+                const store = batch.store || batch.stores;
+                const storeName = store?.name || store?.nome || 'Loja';
+                const promoPrice = batch.promo_price || batch.preco_promocional || 0;
 
-        setGroupedCart(Object.values(grouped));
-        setImageErrors(new Set()); // Reset image errors on new load
-        console.log('[Cart] Cart loaded:', Object.keys(grouped).length, 'stores,', 
-            Object.values(grouped).reduce((sum, store) => sum + store.items.length, 0), 'items');
+                if (!groupedByStore[storeId]) {
+                    groupedByStore[storeId] = {
+                        storeId,
+                        storeName,
+                        storeAddress: store?.address || store?.endereco,
+                        storeLogo: store?.logo_url,
+                        items: [],
+                        total: 0,
+                    };
+                }
+
+                groupedByStore[storeId].items.push(item);
+                groupedByStore[storeId].total += promoPrice * item.quantity;
+            });
+
+            grouped.push(...Object.values(groupedByStore));
+        }
+
+        setGroupedCart(grouped);
+        setImageErrors(new Set());
+        console.log('[Cart] Cart loaded:', grouped.length, 'stores,', 
+            grouped.reduce((sum, store) => sum + store.items.length, 0), 'items');
     }, []);
 
     // Função para atualizar do backend em background
@@ -162,11 +204,11 @@ export default function CartScreen() {
 
             // Timeout reduzido de 15s para 5s
             const fetchCart = api.getCart();
-            const timeoutPromise = new Promise<Cart>((resolve) =>
+            const timeoutPromise = new Promise<Cart | MultiCart>((resolve) =>
                 setTimeout(() => {
                     console.warn('[Cart] Fetch timeout após 5s - retornando carrinho vazio');
-                    resolve({ items: [], total: 0 } as Cart);
-                }, 5000) // 5 segundos (reduzido de 15s)
+                    resolve({ items: [], total: 0 });
+                }, 5000)
             );
 
             const cart = await Promise.race([fetchCart, timeoutPromise]);
@@ -211,7 +253,7 @@ export default function CartScreen() {
                                 const updated = prev.map(store => ({
                                     ...store,
                                     items: store.items.filter(item => {
-                                        const itemBatchId = item.batch_id || (item as any).product_batch_id;
+                                        const itemBatchId = item.batch_id || item.product_batch_id;
                                         return itemBatchId !== batchId;
                                     }),
                                 })).filter(store => store.items.length > 0);
@@ -220,7 +262,7 @@ export default function CartScreen() {
                                 return updated.map(store => ({
                                     ...store,
                                     total: store.items.reduce((sum, item) => {
-                                        const batch = item.batch || (item as any).product_batches;
+                                        const batch = getBatchFromItem(item);
                                         const promoPrice = batch?.promo_price || batch?.preco_promocional || 0;
                                         return sum + (promoPrice * item.quantity);
                                     }, 0),
@@ -228,34 +270,12 @@ export default function CartScreen() {
                             });
                             
                             // Remover do backend
-                            // Nota: removeFromCart pode retornar { cart: null } se carrinho ficar vazio
-                            // ou retornar o carrinho atualizado
                             try {
                                 const result = await api.removeFromCart(batchId);
                                 
-                                // Backend pode retornar { cart: null } ou Cart completo
-                                // Verificar se é um objeto com propriedade 'cart'
-                                if (result && typeof result === 'object' && 'cart' in result) {
-                                    // Backend retornou { cart: null } ou { cart: Cart }
-                                    const cart = (result as any).cart;
-                                    if (cart && 'items' in cart && Array.isArray(cart.items)) {
-                                        // Carrinho não vazio
-                                        updateCartCache(cart);
-                                        processCartData(cart);
-                                    } else {
-                                        // Carrinho vazio
-                                        const emptyCart: Cart = { items: [], total: 0 };
-                                        updateCartCache(emptyCart);
-                                        processCartData(emptyCart);
-                                    }
-                                } else if (result && 'items' in result && Array.isArray(result.items)) {
-                                    // Backend retornou Cart diretamente
-                                    updateCartCache(result);
-                                    processCartData(result);
-                                } else {
-                                    // Formato inesperado - recarregar
-                                    await loadCart();
-                                }
+                                // Atualizar cache e UI com resposta
+                                updateCartCache(result);
+                                processCartData(result);
                             } catch (removeError) {
                                 // Se houver erro, recarregar carrinho
                                 await loadCart();
@@ -274,11 +294,27 @@ export default function CartScreen() {
         );
     };
 
-    const handleCheckout = (storeId: string) => {
+    const handleCheckout = async (storeId: string) => {
         // Check if profile is complete
         if (!isProfileComplete) {
             setShowProfileModal(true);
             return;
+        }
+
+        // Verificar se loja tem asaas_wallet_id configurado antes de permitir checkout
+        try {
+            const storeData = await api.getPublicStore(storeId);
+            if (!storeData.asaas_wallet_id) {
+                Alert.alert(
+                    'Pagamento Indisponível',
+                    'Esta loja ainda não configurou o pagamento. Entre em contato com a loja para mais informações.',
+                    [{ text: 'OK' }]
+                );
+                return;
+            }
+        } catch (error) {
+            console.error('Error checking store payment config:', error);
+            // Continuar mesmo com erro (pode ser problema de rede, validação será feita no checkout)
         }
 
         router.push(`/checkout/${storeId}`);
@@ -308,15 +344,15 @@ export default function CartScreen() {
             return prev.map(store => ({
                 ...store,
                 items: store.items.map(item => {
-                    const itemBatchId = item.batch_id || (item as any).product_batch_id;
+                    const itemBatchId = item.batch_id || item.product_batch_id;
                     if (itemBatchId === batchId) {
                         return { ...item, quantity: newQuantity };
                     }
                     return item;
                 }),
                 total: store.items.reduce((sum, item) => {
-                    const itemBatchId = item.batch_id || (item as any).product_batch_id;
-                    const batch = item.batch || (item as any).product_batches;
+                    const itemBatchId = item.batch_id || item.product_batch_id;
+                    const batch = getBatchFromItem(item);
                     const promoPrice = batch?.promo_price || batch?.preco_promocional || 0;
                     const itemQty = itemBatchId === batchId ? newQuantity : item.quantity;
                     return sum + (promoPrice * itemQty);
@@ -334,23 +370,7 @@ export default function CartScreen() {
             updateCartCache(result);
             
             // Processar resultado para atualizar UI
-            if (result && Array.isArray(result.items)) {
-                const grouped: Record<string, GroupedCart> = {};
-                (result.items || []).forEach((item) => {
-                    const batch = item.batch || item.product_batches;
-                    if (!item || !batch) return;
-                    const storeId = batch.store_id || '';
-                    const store = batch.store || {};
-                    const storeName = store.name || store.nome || 'Loja';
-                    const promoPrice = batch.promo_price || batch.preco_promocional || 0;
-                    if (!grouped[storeId]) {
-                        grouped[storeId] = { storeId, storeName, items: [], total: 0 };
-                    }
-                    grouped[storeId].items.push(item);
-                    grouped[storeId].total += promoPrice * item.quantity;
-                });
-                setGroupedCart(Object.values(grouped));
-            }
+            processCartData(result);
         } catch (error: any) {
             // Em caso de erro, reverter atualização otimista e recarregar
             console.error('[Cart] Error updating quantity:', error?.message || error);
@@ -369,38 +389,46 @@ export default function CartScreen() {
     };
 
     const renderCartItem = (item: CartItem) => {
-        // Handle both frontend format (batch) and backend format (product_batches)
-        const batch = item.batch || (item as any).product_batches;
-        const product = batch?.product || batch?.products;
-        const productName = product?.name || product?.nome || 'Produto';
-        // Try multiple possible image field names
-        const productPhoto = product?.photo1 || product?.foto1 || product?.foto || product?.image || null;
-        const promoPrice = batch?.promo_price || batch?.preco_promocional || 0;
-        const batchId = item.batch_id || (item as any).product_batch_id || '';
+        const batch = getBatchFromItem(item);
+        if (!batch) return null; // Fail-safe: não renderiza se não tiver dados do lote
+
+        // Normaliza produto
+        const product = batch.products || batch.product;
+        const productName = product?.nome || product?.name || 'Produto Indisponível';
+
+        // Normaliza imagem
+        const productPhoto = product?.foto1 || product?.photo1 || product?.image || null;
+
+        // Normaliza preço
+        const promoPrice = batch.preco_promocional ?? batch.promo_price ?? 0;
+
+        // Normaliza ID
+        const batchId = batch.id || item.product_batch_id || item.batch_id;
+        if (!batchId) return null;
+
         // Usar disponivel (estoque disponível) que é calculado no banco
         // disponivel = estoque_total - estoque_reservado - estoque_vendido
-        const availableStock = batch?.disponivel ?? batch?.stock ?? batch?.estoque_total ?? 0;
+        const availableStock = batch.disponivel ?? batch.stock ?? batch.estoque_total ?? 0;
         const itemTotal = promoPrice * item.quantity;
         
         // Verificar se imagem teve erro
-        const imageKey = batchId;
-        const imageError = imageErrors.has(imageKey);
+        const imageError = imageErrors.has(batchId);
         const imageUri = productPhoto && !imageError ? productPhoto : null;
-        
-        const handleImageError = (e: NativeSyntheticEvent<ImageErrorEventData>) => {
-            console.log('[Cart] Erro ao carregar imagem:', imageUri);
-            setImageErrors(prev => new Set(prev).add(imageKey));
+
+        const handleImageError = () => {
+            setImageErrors(prev => new Set(prev).add(batchId));
         };
 
         return (
             <View style={styles.cartItem}>
-                {/* Product Image */}
+                {/* Product Image - Esquerda */}
                 <View style={styles.imageContainer}>
                     {imageUri ? (
                         <Image
                             source={{ uri: imageUri }}
                             style={styles.itemImage}
-                            resizeMode="cover"
+                            contentFit="cover"
+                            transition={200}
                             onError={handleImageError}
                         />
                     ) : (
@@ -410,19 +438,17 @@ export default function CartScreen() {
                     )}
                 </View>
                 
-                {/* Product Info */}
+                {/* Product Info - Centro */}
                 <View style={styles.itemInfo}>
                     <Text style={styles.itemName} numberOfLines={2}>
                         {productName}
                     </Text>
-                    <View style={styles.priceRow}>
-                        <Text style={styles.itemPriceUnit}>
-                            R$ {promoPrice.toFixed(2).replace('.', ',')} /un
-                        </Text>
-                        <Text style={styles.itemPriceTotal}>
-                            R$ {itemTotal.toFixed(2).replace('.', ',')}
-                        </Text>
-                    </View>
+                    <Text style={styles.itemPriceUnit}>
+                        R$ {promoPrice.toFixed(2).replace('.', ',')} /un
+                    </Text>
+                    <Text style={styles.itemPriceTotal}>
+                        R$ {itemTotal.toFixed(2).replace('.', ',')}
+                    </Text>
                     {availableStock < 10 && (
                         <Text style={styles.stockWarning}>
                             {availableStock} un. disponível(is)
@@ -430,7 +456,7 @@ export default function CartScreen() {
                     )}
                 </View>
                 
-                {/* Quantity Controls */}
+                {/* Quantity Controls - Direita */}
                 <View style={styles.quantitySection}>
                     <View style={styles.quantityContainer}>
                         <TouchableOpacity
@@ -443,7 +469,7 @@ export default function CartScreen() {
                         >
                             <Ionicons 
                                 name="remove" 
-                                size={16} 
+                                size={18} 
                                 color={item.quantity <= 1 ? Colors.textMuted : Colors.text} 
                             />
                         </TouchableOpacity>
@@ -466,7 +492,7 @@ export default function CartScreen() {
                         >
                             <Ionicons 
                                 name="add" 
-                                size={16} 
+                                size={18} 
                                 color={item.quantity >= availableStock ? Colors.textMuted : Colors.text} 
                             />
                         </TouchableOpacity>
@@ -480,7 +506,7 @@ export default function CartScreen() {
                         accessibilityLabel="Remover produto do carrinho"
                         accessibilityHint={`Remove ${productName} do carrinho`}
                     >
-                        <Ionicons name="trash-outline" size={18} color={Colors.error} />
+                        <Ionicons name="trash-outline" size={20} color={Colors.error} />
                     </TouchableOpacity>
                 </View>
             </View>
@@ -489,14 +515,27 @@ export default function CartScreen() {
 
     const renderStoreGroup = ({ item }: { item: GroupedCart }) => (
         <View style={styles.storeGroup}>
-            {/* Store Header - Melhorado */}
+            {/* Store Header - Com logo se disponível */}
             <View style={styles.storeHeader}>
                 <View style={styles.storeHeaderLeft}>
-                    <View style={styles.storeIconContainer}>
-                        <Ionicons name="storefront" size={20} color={Colors.primary} />
-                    </View>
+                    {item.storeLogo ? (
+                        <Image
+                            source={{ uri: item.storeLogo }}
+                            style={styles.storeLogo}
+                            contentFit="cover"
+                        />
+                    ) : (
+                        <View style={styles.storeIconContainer}>
+                            <Ionicons name="storefront" size={20} color={Colors.primary} />
+                        </View>
+                    )}
                     <View style={styles.storeInfo}>
                         <Text style={styles.storeName}>{item.storeName}</Text>
+                        {item.storeAddress && (
+                            <Text style={styles.storeAddress} numberOfLines={1}>
+                                {item.storeAddress}
+                            </Text>
+                        )}
                         <Text style={styles.storeItemsCount}>
                             {item.items.length} {item.items.length === 1 ? 'produto' : 'produtos'}
                         </Text>
@@ -508,7 +547,7 @@ export default function CartScreen() {
             <View style={styles.itemsContainer}>
                 {item.items.map((cartItem) => {
                     // Usar id único do cart_item se disponível, senão usar batch_id
-                    const uniqueKey = (cartItem as any).id || cartItem.batch_id || (cartItem as any).product_batch_id || `item-${Math.random()}`;
+                    const uniqueKey = cartItem.id || cartItem.batch_id || cartItem.product_batch_id || `item-${Math.random()}`;
                     return (
                         <React.Fragment key={uniqueKey}>
                             {renderCartItem(cartItem)}
@@ -555,9 +594,13 @@ export default function CartScreen() {
         );
     }
 
+    // Calcular total geral se múltiplas lojas
+    const totalGeral = groupedCart.reduce((sum, store) => sum + store.total, 0);
+    const totalItems = groupedCart.reduce((sum, store) => sum + store.items.length, 0);
+
     return (
         <GradientBackground>
-            <View style={styles.container}>
+            <View style={[styles.container, { paddingTop: screenPaddingTop }]}>
                 {/* Header */}
                 <View style={styles.header}>
                     <Text style={styles.title}>Carrinho</Text>
@@ -578,34 +621,52 @@ export default function CartScreen() {
                         onAction={() => router.push('/(customer)')}
                     />
                 ) : (
-                    <FlatList
-                        data={groupedCart}
-                        renderItem={renderStoreGroup}
-                        keyExtractor={(item) => item.storeId}
-                        contentContainerStyle={styles.listContent}
-                        showsVerticalScrollIndicator={false}
-                        refreshControl={
-                            <RefreshControl
-                                refreshing={refreshing}
-                                onRefresh={onRefresh}
-                                tintColor={Colors.primary}
-                            />
-                        }
-                        removeClippedSubviews={true}
-                        maxToRenderPerBatch={10}
-                        windowSize={10}
-                        initialNumToRender={5}
-                    />
-                )}
+                    <>
+                        <AdaptiveList
+                            data={groupedCart}
+                            renderItem={renderStoreGroup}
+                            keyExtractor={(item) => item.storeId}
+                            contentContainerStyle={[
+                                styles.listContent,
+                                groupedCart.length > 1 && styles.listContentWithFooter,
+                            ]}
+                            showsVerticalScrollIndicator={false}
+                            estimatedItemSize={420}
+                            refreshControl={
+                                <RefreshControl
+                                    refreshing={refreshing}
+                                    onRefresh={onRefresh}
+                                    tintColor={Colors.primary}
+                                />
+                            }
+                            removeClippedSubviews
+                        />
 
-                {/* Info Note */}
-                {groupedCart.length > 1 && (
-                    <View style={styles.infoNote}>
-                        <Ionicons name="information-circle" size={16} color={Colors.textSecondary} />
-                        <Text style={styles.infoNoteText}>
-                            Compras de lojas diferentes são pagas separadamente
-                        </Text>
-                    </View>
+                        {/* Sticky Footer - Apenas se múltiplas lojas */}
+                        {groupedCart.length > 1 && (
+                            <StickyFooter
+                                total={totalGeral}
+                                itemsCount={totalItems}
+                                buttonLabel="Ver Todos os Pedidos"
+                                onButtonPress={() => {
+                                    // Navegar para pedidos ou mostrar resumo
+                                    router.push('/(customer)/orders');
+                                }}
+                                buttonIcon="receipt"
+                                showSubtotal={false}
+                            />
+                        )}
+
+                        {/* Info Note */}
+                        {groupedCart.length > 1 && (
+                            <View style={styles.infoNote}>
+                                <Ionicons name="information-circle" size={16} color={Colors.textSecondary} />
+                                <Text style={styles.infoNoteText}>
+                                    Compras de lojas diferentes são pagas separadamente
+                                </Text>
+                            </View>
+                        )}
+                    </>
                 )}
             </View>
 
@@ -621,7 +682,6 @@ export default function CartScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        paddingTop: 60,
     },
     loadingContainer: {
         flex: 1,
@@ -642,8 +702,11 @@ const styles = StyleSheet.create({
         color: Colors.textSecondary,
     },
     listContent: {
-        paddingHorizontal: 24,
-        paddingBottom: 120,
+        paddingHorizontal: DesignTokens.padding.medium, // Responsivo
+        paddingBottom: DesignTokens.spacing.xxl,
+    },
+    listContentWithFooter: {
+        paddingBottom: 200, // Espaço para sticky footer
     },
     storeGroup: {
         backgroundColor: Colors.backgroundCard,
@@ -658,7 +721,7 @@ const styles = StyleSheet.create({
         padding: 16,
         borderBottomWidth: 1,
         borderBottomColor: Colors.glassBorder,
-        backgroundColor: Colors.glass + '40',
+        backgroundColor: '#F9FAFB', // Gray-50
     },
     storeHeaderLeft: {
         flexDirection: 'row',
@@ -669,9 +732,15 @@ const styles = StyleSheet.create({
         width: 44,
         height: 44,
         borderRadius: 22,
-        backgroundColor: Colors.primary + '20',
+        backgroundColor: 'rgba(5, 150, 105, 0.1)', // Emerald-50
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    storeLogo: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: Colors.glass,
     },
     storeInfo: {
         flex: 1,
@@ -680,6 +749,11 @@ const styles = StyleSheet.create({
         fontSize: 17,
         fontWeight: '700',
         color: Colors.text,
+        marginBottom: 2,
+    },
+    storeAddress: {
+        fontSize: 12,
+        color: Colors.textMuted,
         marginBottom: 2,
     },
     storeItemsCount: {
@@ -692,62 +766,58 @@ const styles = StyleSheet.create({
     cartItem: {
         flexDirection: 'row',
         alignItems: 'flex-start',
-        paddingVertical: 16,
-        paddingHorizontal: 4,
+        paddingVertical: DesignTokens.spacing.md, // 16px conforme plano
+        paddingHorizontal: DesignTokens.spacing.xs,
         borderBottomWidth: 1,
-        borderBottomColor: Colors.glassBorder,
+        borderBottomColor: Colors.border,
+        gap: DesignTokens.spacing.sm, // 12px gap conforme plano
     },
     imageContainer: {
-        marginRight: 12,
+        marginRight: 0, // Gap já aplicado
     },
     itemImage: {
-        width: 70,
-        height: 70,
-        borderRadius: 12,
+        width: 80, // 80x80 conforme plano
+        height: 80,
+        borderRadius: DesignTokens.borderRadius.md,
         backgroundColor: Colors.glass,
     },
     imagePlaceholder: {
         backgroundColor: Colors.glass,
         alignItems: 'center',
         justifyContent: 'center',
-        width: 70,
-        height: 70,
-        borderRadius: 12,
+        width: 80,
+        height: 80,
+        borderRadius: DesignTokens.borderRadius.md,
     },
     itemInfo: {
         flex: 1,
-        marginRight: 8,
+        marginRight: 0, // Gap já aplicado
     },
     itemName: {
-        fontSize: 15,
-        fontWeight: '600',
+        ...DesignTokens.typography.bodyBold,
         color: Colors.text,
-        marginBottom: 6,
+        marginBottom: DesignTokens.spacing.xs,
         lineHeight: 20,
     },
-    priceRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 4,
-    },
     itemPriceUnit: {
-        fontSize: 12,
+        ...DesignTokens.typography.caption,
         color: Colors.textSecondary,
+        marginBottom: DesignTokens.spacing.xs / 2,
     },
     itemPriceTotal: {
-        fontSize: 16,
+        fontSize: 18,
         fontWeight: '700',
-        color: Colors.success,
+        color: Colors.primary, // Verde = economia
+        letterSpacing: -0.3,
     },
     stockWarning: {
-        fontSize: 11,
+        ...DesignTokens.typography.tiny,
         color: Colors.warning,
-        marginTop: 4,
+        marginTop: DesignTokens.spacing.xs / 2,
     },
     quantitySection: {
         alignItems: 'flex-end',
-        gap: 8,
+        gap: DesignTokens.spacing.sm,
     },
     quantityContainer: {
         flexDirection: 'row',
@@ -790,7 +860,7 @@ const styles = StyleSheet.create({
     },
     storeFooter: {
         padding: 20,
-        backgroundColor: Colors.glass,
+        backgroundColor: '#F9FAFB', // Gray-50
         borderTopWidth: 1,
         borderTopColor: Colors.glassBorder,
     },
@@ -828,7 +898,7 @@ const styles = StyleSheet.create({
     totalValue: {
         fontSize: 22,
         fontWeight: '700',
-        color: Colors.success,
+        color: Colors.primary, // Verde = economia
     },
     infoNote: {
         flexDirection: 'row',

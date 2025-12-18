@@ -1,15 +1,16 @@
+import { useAuth } from '@/contexts/AuthContext';
+import { api, Cart, MultiCart } from '@/services/api';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { api, Cart } from '../services/api';
-import { useAuth } from './AuthContext';
 
 interface CartContextType {
     cartItemCount: number;
-    cachedCart: Cart | null;
+    cachedCart: Cart | MultiCart | null;
     cacheTimestamp: number;
     refreshCartCount: () => Promise<void>;
-    updateCartCache: (cart: Cart) => void;
+    updateCartCache: (cart: Cart | MultiCart) => void;
     invalidateCache: () => void;
-    getCachedCart: () => Cart | null;
+    getCachedCart: () => Cart | MultiCart | null;
+    getCartsArray: () => Cart[];
     incrementCartCount: (amount: number) => void;
     decrementCartCount: (amount: number) => void;
 }
@@ -24,17 +25,48 @@ const DEBOUNCE_DELAY_MS = 500;
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { session, user } = useAuth();
     const [cartItemCount, setCartItemCount] = useState(0);
-    const [cachedCart, setCachedCart] = useState<Cart | null>(null);
+    const [cachedCart, setCachedCart] = useState<Cart | MultiCart | null>(null);
     const [cacheTimestamp, setCacheTimestamp] = useState<number>(0);
     const [isRefreshing, setIsRefreshing] = useState(false);
-    const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Helper para calcular total de items de Cart ou MultiCart
+    const calculateTotalItems = (cart: Cart | MultiCart | null): number => {
+        if (!cart) return 0;
+        
+        // Se é MultiCart
+        if ('carts' in cart && Array.isArray(cart.carts)) {
+            return cart.carts.reduce((total, c) => {
+                return total + (c.items || []).reduce((sum, item) => sum + (item.quantity || 0), 0);
+            }, 0);
+        }
+        
+        // Se é Cart único
+        return (cart.items || []).reduce((sum, item) => sum + (item.quantity || 0), 0);
+    };
+
+    // Helper para converter para array de carrinhos
+    const getCartsArray = useCallback((): Cart[] => {
+        if (!cachedCart) return [];
+        
+        // Se é MultiCart
+        if ('carts' in cachedCart && Array.isArray(cachedCart.carts)) {
+            return cachedCart.carts;
+        }
+        
+        // Se é Cart único com items
+        if ((cachedCart as Cart).items && (cachedCart as Cart).items.length > 0) {
+            return [cachedCart as Cart];
+        }
+        
+        return [];
+    }, [cachedCart]);
 
     // Update cart cache and badge count
-    const updateCartCache = useCallback((cart: Cart) => {
+    const updateCartCache = useCallback((cart: Cart | MultiCart) => {
         setCachedCart(cart);
         setCacheTimestamp(Date.now());
-        const totalItems = (cart.items || []).reduce((sum, item) => sum + (item.quantity || 0), 0);
-        setCartItemCount(totalItems);
+        setCartItemCount(calculateTotalItems(cart));
     }, []);
 
     // Invalidate cache
@@ -114,8 +146,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             
             if (cached && cacheAge < CACHE_VALIDITY_MS) {
                 // Use cached count
-                const totalItems = (cached.items || []).reduce((sum, item) => sum + (item.quantity || 0), 0);
-                setCartItemCount(totalItems);
+                setCartItemCount(calculateTotalItems(cached));
                 return;
             }
 
@@ -124,7 +155,6 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setIsRefreshing(true);
             
             try {
-                // Use timeout rápido (1s em vez de 2s)
                 const timeoutPromise = new Promise<number>((resolve) => 
                     setTimeout(() => resolve(0), 1000)
                 );
@@ -132,15 +162,12 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 const cartPromise = api.getCart().then(cart => {
                     // Update cache with fresh data
                     updateCartCache(cart);
-                    return (cart.items || []).reduce((sum, item) => sum + (item.quantity || 0), 0);
+                    return calculateTotalItems(cart);
                 }).catch(error => {
-                    // Tratar erro 403 (Insufficient role) como esperado - usuário não é customer
                     const isForbidden = error?.status === 403 || error?.statusCode === 403;
                     if (isForbidden) {
-                        // Usuário não é customer, não logar como erro
                         return 0;
                     }
-                    // Em caso de erro de rede, não atualizar contador
                     console.log('[CartContext] Erro ao buscar carrinho (silencioso):', error?.message);
                     return 0;
                 });
@@ -148,7 +175,6 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 const totalItems = await Promise.race([cartPromise, timeoutPromise]);
                 setCartItemCount(totalItems);
             } catch (error) {
-                // Silently fail - don't update count on error
                 console.log('[CartContext] Erro ao atualizar contador do carrinho:', error);
             } finally {
                 isRefreshingRef.current = false;
@@ -181,8 +207,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             
             if (cacheAge < CACHE_VALIDITY_MS && cachedCart) {
                 // Cache válido, não fazer requisição
-                const totalItems = (cachedCart.items || []).reduce((sum, item) => sum + (item.quantity || 0), 0);
-                setCartItemCount(totalItems);
+                setCartItemCount(calculateTotalItems(cachedCart));
             } else {
                 // Cache inválido ou não existe, fazer refresh
                 refreshCartCount();
@@ -212,6 +237,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             updateCartCache,
             invalidateCache,
             getCachedCart,
+            getCartsArray,
             incrementCartCount,
             decrementCartCount
         }}>

@@ -1,21 +1,25 @@
+import { GradientBackground } from '@/components/GradientBackground';
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { useAuth } from '@/contexts/AuthContext';
+import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
+import { router } from 'expo-router';
 import React from 'react';
 import {
-    StyleSheet,
-    View,
-    Text,
-    ScrollView,
-    TouchableOpacity,
-    Image,
-    Alert,
     ActivityIndicator,
+    Alert,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import { router } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { GradientBackground } from '../../components/GradientBackground';
-import { Colors } from '../../constants/Colors';
-import { useAuth } from '../../contexts/AuthContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function CustomerProfileScreen() {
+    const insets = useSafeAreaInsets();
+    const screenPaddingTop = insets.top + DesignTokens.spacing.md;
     const { user, loading, signOut } = useAuth();
 
     const handleLogout = () => {
@@ -59,7 +63,11 @@ export default function CustomerProfileScreen() {
 
     return (
         <GradientBackground>
-            <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+            <ScrollView
+                style={styles.container}
+                contentContainerStyle={[styles.contentContainer, { paddingTop: screenPaddingTop }]}
+                showsVerticalScrollIndicator={false}
+            >
                 {/* Header */}
                 <View style={styles.header}>
                     <Text style={styles.title}>Perfil</Text>
@@ -69,7 +77,12 @@ export default function CustomerProfileScreen() {
                 <View style={styles.profileCard}>
                     <View style={styles.avatarContainer}>
                         {user?.photo_url ? (
-                            <Image source={{ uri: user.photo_url }} style={styles.avatar} />
+                            <Image
+                                source={{ uri: user.photo_url }}
+                                style={styles.avatar}
+                                contentFit="cover"
+                                transition={200}
+                            />
                         ) : (
                             <View style={styles.avatarPlaceholder}>
                                 <Ionicons name="person" size={40} color={Colors.textMuted} />
@@ -94,7 +107,7 @@ export default function CustomerProfileScreen() {
                         style={styles.menuItem}
                         onPress={() => router.push('/(customer)/setup')}
                     >
-                        <View style={[styles.menuIcon, { backgroundColor: 'rgba(99, 102, 241, 0.15)' }]}>
+                        <View style={[styles.menuIcon, styles.menuIconPrimary]}>
                             <Ionicons name="person-outline" size={20} color={Colors.primary} />
                         </View>
                         <Text style={styles.menuText}>Editar Perfil</Text>
@@ -102,7 +115,7 @@ export default function CustomerProfileScreen() {
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.menuItem}>
-                        <View style={[styles.menuIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+                        <View style={[styles.menuIcon, styles.menuIconSuccess]}>
                             <Ionicons name="location-outline" size={20} color={Colors.success} />
                         </View>
                         <Text style={styles.menuText}>Endereços</Text>
@@ -110,7 +123,7 @@ export default function CustomerProfileScreen() {
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.menuItem}>
-                        <View style={[styles.menuIcon, { backgroundColor: 'rgba(236, 72, 153, 0.15)' }]}>
+                        <View style={[styles.menuIcon, styles.menuIconSecondary]}>
                             <Ionicons name="notifications-outline" size={20} color={Colors.secondary} />
                         </View>
                         <Text style={styles.menuText}>Notificações</Text>
@@ -125,7 +138,7 @@ export default function CustomerProfileScreen() {
                         style={styles.menuItem}
                         onPress={handleSwitchRole}
                     >
-                        <View style={[styles.menuIcon, { backgroundColor: 'rgba(236, 72, 153, 0.15)' }]}>
+                        <View style={[styles.menuIcon, styles.menuIconSecondary]}>
                             <Ionicons name="swap-horizontal" size={20} color={Colors.secondary} />
                         </View>
                         <Text style={styles.menuText}>Trocar para Lojista</Text>
@@ -133,7 +146,7 @@ export default function CustomerProfileScreen() {
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.menuItem}>
-                        <View style={[styles.menuIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
+                        <View style={[styles.menuIcon, styles.menuIconWarning]}>
                             <Ionicons name="help-circle-outline" size={20} color={Colors.warning} />
                         </View>
                         <Text style={styles.menuText}>Ajuda</Text>
@@ -141,7 +154,7 @@ export default function CustomerProfileScreen() {
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.menuItem}>
-                        <View style={[styles.menuIcon, { backgroundColor: 'rgba(107, 114, 128, 0.15)' }]}>
+                        <View style={[styles.menuIcon, styles.menuIconNeutral]}>
                             <Ionicons name="document-text-outline" size={20} color={Colors.textSecondary} />
                         </View>
                         <Text style={styles.menuText}>Termos de Uso</Text>
@@ -169,7 +182,9 @@ export default function CustomerProfileScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        paddingTop: 60,
+    },
+    contentContainer: {
+        paddingBottom: 100,
     },
     loadingContainer: {
         flex: 1,
@@ -177,27 +192,27 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     header: {
-        paddingHorizontal: 24,
-        marginBottom: 24,
+        paddingHorizontal: DesignTokens.spacing.lg,
+        marginBottom: DesignTokens.spacing.lg,
     },
     title: {
-        fontSize: 28,
-        fontWeight: '700',
+        ...DesignTokens.typography.h1,
         color: Colors.text,
     },
     profileCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginHorizontal: 24,
-        padding: 20,
+        marginHorizontal: DesignTokens.spacing.lg,
+        padding: DesignTokens.spacing.lg,
         backgroundColor: Colors.backgroundCard,
-        borderRadius: 20,
+        borderRadius: DesignTokens.borderRadius.xl,
         borderWidth: 1,
         borderColor: Colors.glassBorder,
-        marginBottom: 24,
+        marginBottom: DesignTokens.spacing.lg,
+        ...DesignTokens.shadows.sm,
     },
     avatarContainer: {
-        marginRight: 16,
+        marginRight: DesignTokens.spacing.md,
     },
     avatar: {
         width: 72,
@@ -208,7 +223,7 @@ const styles = StyleSheet.create({
         width: 72,
         height: 72,
         borderRadius: 24,
-        backgroundColor: Colors.glass,
+        backgroundColor: Colors.inputBackground,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -216,40 +231,37 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     userName: {
-        fontSize: 20,
-        fontWeight: '600',
+        ...DesignTokens.typography.h3,
         color: Colors.text,
-        marginBottom: 4,
+        marginBottom: DesignTokens.spacing.xs,
     },
     userEmail: {
-        fontSize: 13,
+        ...DesignTokens.typography.small,
         color: Colors.textSecondary,
-        marginBottom: 8,
+        marginBottom: DesignTokens.spacing.sm,
     },
     roleBadge: {
         flexDirection: 'row',
         alignItems: 'center',
         alignSelf: 'flex-start',
-        backgroundColor: Colors.primary + '20',
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 8,
-        gap: 4,
+        backgroundColor: '#ECFDF5', // Emerald-50
+        paddingHorizontal: DesignTokens.spacing.sm + 2,
+        paddingVertical: DesignTokens.spacing.xs,
+        borderRadius: DesignTokens.borderRadius.sm,
+        gap: DesignTokens.spacing.xs,
     },
     roleText: {
-        fontSize: 12,
-        fontWeight: '500',
+        ...DesignTokens.typography.captionBold,
         color: Colors.primary,
     },
     menuSection: {
-        marginHorizontal: 24,
-        marginBottom: 24,
+        marginHorizontal: DesignTokens.spacing.lg,
+        marginBottom: DesignTokens.spacing.lg,
     },
     sectionTitle: {
-        fontSize: 14,
-        fontWeight: '600',
+        ...DesignTokens.typography.captionBold,
         color: Colors.textMuted,
-        marginBottom: 12,
+        marginBottom: DesignTokens.spacing.md - 4,
         textTransform: 'uppercase',
         letterSpacing: 0.5,
     },
@@ -257,45 +269,61 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: Colors.backgroundCard,
-        borderRadius: 14,
-        padding: 14,
-        marginBottom: 8,
+        borderRadius: DesignTokens.borderRadius.lg,
+        padding: DesignTokens.spacing.md - 2,
+        marginBottom: DesignTokens.spacing.sm,
         borderWidth: 1,
         borderColor: Colors.glassBorder,
+        ...DesignTokens.shadows.sm,
     },
     menuIcon: {
         width: 40,
         height: 40,
-        borderRadius: 12,
+        borderRadius: DesignTokens.borderRadius.md,
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: 12,
+        marginRight: DesignTokens.spacing.md - 4,
+    },
+    menuIconPrimary: {
+        backgroundColor: Colors.primary15,
+    },
+    menuIconSuccess: {
+        backgroundColor: Colors.success15,
+    },
+    menuIconSecondary: {
+        backgroundColor: Colors.secondary15,
+    },
+    menuIconWarning: {
+        backgroundColor: Colors.warning15,
+    },
+    menuIconNeutral: {
+        backgroundColor: Colors.glassStrong,
+        borderWidth: 1,
+        borderColor: Colors.glassBorder,
     },
     menuText: {
         flex: 1,
-        fontSize: 15,
-        fontWeight: '500',
+        ...DesignTokens.typography.body,
         color: Colors.text,
     },
     logoutButton: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        marginHorizontal: 24,
-        paddingVertical: 14,
-        backgroundColor: Colors.error + '15',
-        borderRadius: 14,
-        gap: 8,
+        marginHorizontal: DesignTokens.spacing.lg,
+        paddingVertical: DesignTokens.spacing.md - 2,
+        backgroundColor: Colors.error15,
+        borderRadius: DesignTokens.borderRadius.lg,
+        gap: DesignTokens.spacing.sm,
     },
     logoutText: {
-        fontSize: 15,
-        fontWeight: '600',
+        ...DesignTokens.typography.bodyBold,
         color: Colors.error,
     },
     versionText: {
-        fontSize: 12,
+        ...DesignTokens.typography.caption,
         color: Colors.textMuted,
         textAlign: 'center',
-        marginTop: 24,
+        marginTop: DesignTokens.spacing.lg,
     },
 });

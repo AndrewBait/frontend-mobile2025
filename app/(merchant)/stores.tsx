@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
     StyleSheet,
     View,
@@ -13,10 +13,10 @@ import { router } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { GradientBackground } from '../../components/GradientBackground';
-import { Colors } from '../../constants/Colors';
-import { api, Store } from '../../services/api';
-import { useAuth } from '../../contexts/AuthContext';
+import { GradientBackground } from '@/components/GradientBackground';
+import { Colors } from '@/constants/Colors';
+import { api, Store } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function MerchantStoresScreen() {
     const { session, isLoggingOut } = useAuth();
@@ -277,16 +277,16 @@ const styles = StyleSheet.create({
         marginHorizontal: 24,
         marginBottom: 20,
         padding: 16,
-        backgroundColor: Colors.success + '15',
+        backgroundColor: Colors.success15,
         borderRadius: 16,
         borderWidth: 1,
-        borderColor: Colors.success + '30',
+        borderColor: Colors.success30,
     },
     freeBannerIcon: {
         width: 48,
         height: 48,
         borderRadius: 14,
-        backgroundColor: Colors.success + '20',
+        backgroundColor: Colors.success20,
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: 14,
@@ -325,7 +325,7 @@ const styles = StyleSheet.create({
         width: 56,
         height: 56,
         borderRadius: 16,
-        backgroundColor: Colors.secondary + '20',
+        backgroundColor: Colors.secondary20,
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: 14,
@@ -392,7 +392,7 @@ const styles = StyleSheet.create({
         gap: 6,
     },
     statusActive: {
-        backgroundColor: Colors.success + '15',
+        backgroundColor: Colors.success15,
     },
     statusInactive: {
         backgroundColor: Colors.glass,

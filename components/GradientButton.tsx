@@ -1,7 +1,7 @@
 import React from 'react';
-import { StyleSheet, TouchableOpacity, Text, ActivityIndicator, View } from 'react-native';
+import { StyleSheet, TouchableOpacity, Text, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Colors } from '../constants/Colors';
+import { Colors } from '@/constants/Colors';
 
 interface GradientButtonProps {
     title: string;

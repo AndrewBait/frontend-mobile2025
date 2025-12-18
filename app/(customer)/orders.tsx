@@ -1,10 +1,16 @@
+import { AdaptiveList } from '@/components/base/AdaptiveList';
+import { Badge } from '@/components/base/Badge';
+import { EmptyState } from '@/components/feedback/EmptyState';
+import { GradientBackground } from '@/components/GradientBackground';
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { api, Order } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import {
     ActivityIndicator,
-    FlatList,
     RefreshControl,
     StyleSheet,
     Text,
@@ -17,14 +23,11 @@ import Animated, {
     withSpring,
     withTiming,
 } from 'react-native-reanimated';
-import { Badge } from '../../components/base/Badge';
-import { EmptyState } from '../../components/feedback/EmptyState';
-import { GradientBackground } from '../../components/GradientBackground';
-import { Colors } from '../../constants/Colors';
-import { DesignTokens } from '../../constants/designTokens';
-import { api, Order } from '../../services/api';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function OrdersScreen() {
+    const insets = useSafeAreaInsets();
+    const screenPaddingTop = insets.top + DesignTokens.spacing.md;
     const [orders, setOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -134,7 +137,7 @@ export default function OrdersScreen() {
 
                         <View style={styles.totalRow}>
                             <Text style={styles.totalLabel}>Total</Text>
-                            <Text style={styles.totalValue}>R$ {item.total_amount.toFixed(2).replace('.', ',')}</Text>
+                            <Text style={styles.totalValue}>R$ {item.total.toFixed(2).replace('.', ',')}</Text>
                         </View>
                     </View>
 
@@ -165,7 +168,7 @@ export default function OrdersScreen() {
 
     return (
         <GradientBackground>
-            <View style={styles.container}>
+            <View style={[styles.container, { paddingTop: screenPaddingTop }]}>
                 {/* Header */}
                 <View style={styles.header}>
                     <Text style={styles.title}>Meus Pedidos</Text>
@@ -181,12 +184,13 @@ export default function OrdersScreen() {
                         onAction={() => router.push('/(customer)')}
                     />
                 ) : (
-                    <FlatList
+                    <AdaptiveList
                         data={orders}
                         renderItem={renderOrder}
                         keyExtractor={(item) => item.id}
                         contentContainerStyle={styles.listContent}
                         showsVerticalScrollIndicator={false}
+                        estimatedItemSize={140}
                         refreshControl={
                             <RefreshControl
                                 refreshing={refreshing}
@@ -208,7 +212,6 @@ export default function OrdersScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        paddingTop: 60,
     },
     loadingContainer: {
         flex: 1,
@@ -229,15 +232,15 @@ const styles = StyleSheet.create({
         color: Colors.textSecondary,
     },
     listContent: {
-        paddingHorizontal: 24,
-        paddingBottom: 100,
+        paddingHorizontal: DesignTokens.padding.medium, // Responsivo
+        paddingBottom: DesignTokens.spacing.xxl,
     },
     orderCard: {
-        backgroundColor: Colors.backgroundCard,
+        backgroundColor: Colors.backgroundLight, // #FFFFFF
         borderRadius: DesignTokens.borderRadius.lg,
         borderWidth: 1,
-        borderColor: Colors.glassBorder,
-        padding: DesignTokens.spacing.md,
+        borderColor: Colors.border,
+        padding: DesignTokens.spacing.lg, // 20px conforme plano
         marginBottom: DesignTokens.spacing.md,
         ...DesignTokens.shadows.sm,
     },
@@ -245,7 +248,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        marginBottom: 16,
+        marginBottom: DesignTokens.spacing.md,
     },
     orderNumber: {
         fontSize: 16,
@@ -258,7 +261,7 @@ const styles = StyleSheet.create({
         color: Colors.textMuted,
     },
     orderBody: {
-        gap: 12,
+        gap: DesignTokens.spacing.sm,
     },
     storeRow: {
         flexDirection: 'row',
@@ -273,37 +276,39 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingTop: 12,
+        paddingTop: DesignTokens.spacing.sm,
         borderTopWidth: 1,
-        borderTopColor: Colors.glassBorder,
+        borderTopColor: Colors.border,
+        marginTop: DesignTokens.spacing.xs,
     },
     totalLabel: {
-        fontSize: 14,
-        color: Colors.textSecondary,
+        ...DesignTokens.typography.bodyBold,
+        color: Colors.text,
     },
     totalValue: {
-        fontSize: 18,
+        fontSize: 20,
         fontWeight: '700',
-        color: Colors.text,
+        color: Colors.primary, // Verde = economia
+        letterSpacing: -0.3,
     },
     pickupCodeContainer: {
         marginTop: DesignTokens.spacing.md,
-        backgroundColor: Colors.success15,
+        backgroundColor: '#ECFDF5', // Emerald-50
         borderRadius: DesignTokens.borderRadius.md,
         padding: DesignTokens.spacing.md,
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: Colors.success,
+        borderColor: Colors.primary, // Verde
     },
     pickupCodeLabel: {
         ...DesignTokens.typography.captionBold,
-        color: Colors.success,
+        color: Colors.primary, // Verde
         marginBottom: DesignTokens.spacing.sm,
     },
     pickupCode: {
         fontSize: 28,
         fontWeight: '800',
-        color: Colors.success,
+        color: Colors.primary, // Verde
         letterSpacing: 4,
         fontFamily: 'monospace',
     },

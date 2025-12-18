@@ -1,12 +1,20 @@
+/**
+ * Input - VenceJá Design System
+ * 
+ * Campo de entrada moderno com animações suaves,
+ * estados visuais claros e excelente UX
+ */
+
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import {
-    NativeSyntheticEvent,
     StyleSheet,
     Text,
     TextInput,
-    TextInputFocusEventData,
     TextInputProps,
+    TextStyle,
     TouchableOpacity,
     View,
     ViewStyle,
@@ -15,31 +23,34 @@ import Animated, {
     interpolate,
     useAnimatedStyle,
     useSharedValue,
+    withSpring,
     withTiming,
 } from 'react-native-reanimated';
-import { Colors } from '../../constants/Colors';
-import { DesignTokens } from '../../constants/designTokens';
 
 interface InputProps extends TextInputProps {
     label?: string;
     error?: string;
+    hint?: string;
     leftIcon?: keyof typeof Ionicons.glyphMap;
     rightIcon?: keyof typeof Ionicons.glyphMap;
     onRightIconPress?: () => void;
     containerStyle?: ViewStyle;
-    inputStyle?: ViewStyle;
+    inputStyle?: TextStyle;
     floatingLabel?: boolean;
+    required?: boolean;
 }
 
 export const Input: React.FC<InputProps> = ({
     label,
     error,
+    hint,
     leftIcon,
     rightIcon,
     onRightIconPress,
     containerStyle,
     inputStyle,
     floatingLabel = false,
+    required = false,
     placeholder,
     value,
     onFocus,
@@ -47,130 +58,185 @@ export const Input: React.FC<InputProps> = ({
     ...textInputProps
 }) => {
     const [isFocused, setIsFocused] = useState(false);
-    const [hasValue, setHasValue] = useState(!!value);
+    const focusAnimation = useSharedValue(0);
     const labelPosition = useSharedValue(value ? 1 : 0);
-    const labelScale = useSharedValue(value ? 0.85 : 1);
 
-    const handleFocus = (e: NativeSyntheticEvent<TextInputFocusEventData>) => {
+    const handleFocus: NonNullable<TextInputProps['onFocus']> = (e) => {
         setIsFocused(true);
-        labelPosition.value = withTiming(1, { duration: DesignTokens.animations.normal });
-        labelScale.value = withTiming(0.85, { duration: DesignTokens.animations.normal });
+        focusAnimation.value = withSpring(1, { damping: 15, stiffness: 200 });
+        if (floatingLabel) {
+            labelPosition.value = withTiming(1, { duration: 200 });
+        }
         onFocus?.(e);
     };
 
-    const handleBlur = (e: NativeSyntheticEvent<TextInputFocusEventData>) => {
+    const handleBlur: NonNullable<TextInputProps['onBlur']> = (e) => {
         setIsFocused(false);
-        if (!value) {
-            labelPosition.value = withTiming(0, { duration: DesignTokens.animations.normal });
-            labelScale.value = withTiming(1, { duration: DesignTokens.animations.normal });
+        focusAnimation.value = withSpring(0, { damping: 15, stiffness: 200 });
+        if (floatingLabel && !value) {
+            labelPosition.value = withTiming(0, { duration: 200 });
         }
         onBlur?.(e);
     };
 
     const handleChangeText = (text: string) => {
-        setHasValue(text.length > 0);
-        if (text.length > 0 && !hasValue) {
-            labelPosition.value = withTiming(1, { duration: DesignTokens.animations.normal });
-            labelScale.value = withTiming(0.85, { duration: DesignTokens.animations.normal });
-        } else if (text.length === 0 && hasValue) {
-            labelPosition.value = withTiming(0, { duration: DesignTokens.animations.normal });
-            labelScale.value = withTiming(1, { duration: DesignTokens.animations.normal });
+        if (floatingLabel) {
+            if (text.length > 0) {
+                labelPosition.value = withTiming(1, { duration: 200 });
+            } else if (!isFocused) {
+                labelPosition.value = withTiming(0, { duration: 200 });
+            }
         }
         textInputProps.onChangeText?.(text);
     };
 
-    const animatedLabelStyle = useAnimatedStyle(() => {
-        const translateY = interpolate(labelPosition.value, [0, 1], [0, -28]);
+    // Animated border style
+    const animatedContainerStyle = useAnimatedStyle(() => {
+        const borderColor = error
+            ? Colors.error
+            : interpolate(
+                focusAnimation.value,
+                [0, 1],
+                [Colors.border.charCodeAt(0), Colors.primary.charCodeAt(0)]
+            ) ? (isFocused ? Colors.primary : Colors.border)
+            : Colors.border;
+
         return {
+            borderColor: error ? Colors.error : isFocused ? Colors.primary : Colors.border,
+            borderWidth: isFocused ? 2 : 1.5,
             transform: [
-                { translateY },
-                { scale: labelScale.value },
+                {
+                    scale: interpolate(focusAnimation.value, [0, 0.5, 1], [1, 0.995, 1]),
+                },
             ],
         };
     });
 
-    const animatedBorderStyle = useAnimatedStyle(() => {
-        const borderColor = error
-            ? Colors.error
-            : isFocused
-                ? Colors.primary
-                : Colors.glassBorder;
-        const borderWidth = isFocused ? 2 : 1;
-
+    // Floating label animation
+    const animatedLabelStyle = useAnimatedStyle(() => {
         return {
-            borderColor: withTiming(borderColor, { duration: DesignTokens.animations.fast }),
-            borderWidth: withTiming(borderWidth, { duration: DesignTokens.animations.fast }),
+            transform: [
+                { translateY: interpolate(labelPosition.value, [0, 1], [0, -26]) },
+                { scale: interpolate(labelPosition.value, [0, 1], [1, 0.85]) },
+            ],
+            opacity: interpolate(labelPosition.value, [0, 0.5, 1], [0.7, 0.9, 1]),
         };
     });
 
+    const hasError = !!error;
+    const leftIconPadding = leftIcon ? 48 : 16;
+
     return (
         <View style={[styles.container, containerStyle]}>
+            {/* Fixed Label */}
             {label && !floatingLabel && (
-                <Text style={[styles.label, error && styles.labelError]}>{label}</Text>
+                <View style={styles.labelRow}>
+                    <Text style={[styles.label, hasError && styles.labelError]}>
+                        {label}
+                        {required && <Text style={styles.required}> *</Text>}
+                    </Text>
+                </View>
             )}
-            <Animated.View style={[styles.inputContainer, animatedBorderStyle]}>
+
+            {/* Input Container */}
+            <Animated.View
+                style={[
+                    styles.inputContainer,
+                    hasError && styles.inputContainerError,
+                    animatedContainerStyle,
+                ]}
+            >
+                {/* Left Icon */}
                 {leftIcon && (
                     <View style={styles.leftIconContainer}>
                         <Ionicons
                             name={leftIcon}
-                            size={20}
-                            color={isFocused ? Colors.primary : Colors.textMuted}
+                            size={22}
+                            color={hasError ? Colors.error : isFocused ? Colors.primary : Colors.textMuted}
                         />
                     </View>
                 )}
+
+                {/* Input Wrapper */}
                 <View style={styles.inputWrapper}>
+                    {/* Floating Label */}
                     {floatingLabel && label && (
-                        <Animated.View style={[styles.floatingLabelContainer, animatedLabelStyle]}>
-                            <Text
-                                style={[
-                                    styles.floatingLabel,
-                                    isFocused && styles.floatingLabelFocused,
-                                    error && styles.floatingLabelError,
-                                ]}
-                            >
-                                {label}
-                            </Text>
+                        <Animated.View
+                            style={[
+                                styles.floatingLabelContainer,
+                                { left: leftIconPadding },
+                                animatedLabelStyle,
+                            ]}
+                            pointerEvents="none"
+                        >
+                            <View style={styles.floatingLabelBackground}>
+                                <Text
+                                    style={[
+                                        styles.floatingLabel,
+                                        isFocused && styles.floatingLabelFocused,
+                                        hasError && styles.floatingLabelError,
+                                    ]}
+                                >
+                                    {label}
+                                    {required && <Text style={styles.required}> *</Text>}
+                                </Text>
+                            </View>
                         </Animated.View>
                     )}
+
+                    {/* Text Input */}
                     <TextInput
                         {...textInputProps}
                         value={value}
                         onFocus={handleFocus}
                         onBlur={handleBlur}
                         onChangeText={handleChangeText}
-                        placeholder={floatingLabel && label ? undefined : placeholder}
+                        placeholder={floatingLabel ? undefined : placeholder}
                         placeholderTextColor={Colors.textMuted}
                         style={[
                             styles.input,
                             leftIcon && styles.inputWithLeftIcon,
-                            rightIcon && styles.inputWithRightIcon,
+                            (rightIcon || hasError) && styles.inputWithRightIcon,
                             inputStyle,
                         ]}
                         selectionColor={Colors.primary}
                         cursorColor={Colors.primary}
                     />
                 </View>
-                {rightIcon && (
+
+                {/* Right Icon */}
+                {rightIcon && !hasError && (
                     <TouchableOpacity
                         style={styles.rightIconContainer}
                         onPress={onRightIconPress}
                         disabled={!onRightIconPress}
+                        activeOpacity={0.7}
                     >
                         <Ionicons
                             name={rightIcon}
-                            size={20}
-                            color={error ? Colors.error : isFocused ? Colors.primary : Colors.textMuted}
+                            size={22}
+                            color={isFocused ? Colors.primary : Colors.textMuted}
                         />
                     </TouchableOpacity>
                 )}
-                {error && (
+
+                {/* Error Icon */}
+                {hasError && (
                     <View style={styles.errorIconContainer}>
-                        <Ionicons name="alert-circle" size={18} color={Colors.error} />
+                        <Ionicons name="alert-circle" size={22} color={Colors.error} />
                     </View>
                 )}
             </Animated.View>
-            {error && (
-                <Text style={styles.errorText}>{error}</Text>
+
+            {/* Error or Hint Message */}
+            {(error || hint) && (
+                <View style={styles.messageContainer}>
+                    {hasError ? (
+                        <Text style={styles.errorText}>{error}</Text>
+                    ) : hint ? (
+                        <Text style={styles.hintText}>{hint}</Text>
+                    ) : null}
+                </View>
             )}
         </View>
     );
@@ -180,37 +246,56 @@ const styles = StyleSheet.create({
     container: {
         marginBottom: DesignTokens.spacing.md,
     },
-    label: {
-        ...DesignTokens.typography.smallBold,
-        color: Colors.text,
+    labelRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
         marginBottom: DesignTokens.spacing.sm,
+    },
+    label: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: Colors.text,
+        letterSpacing: 0.1,
     },
     labelError: {
         color: Colors.error,
     },
+    required: {
+        color: Colors.error,
+        fontWeight: '600',
+    },
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: Colors.glass,
-        borderRadius: DesignTokens.borderRadius.md,
-        borderWidth: 1,
-        minHeight: DesignTokens.touchTargets.min,
+        backgroundColor: Colors.backgroundLight,
+        borderRadius: DesignTokens.borderRadius.lg,
+        borderWidth: 1.5,
+        borderColor: Colors.border,
+        minHeight: 56,
+        overflow: 'hidden',
+    },
+    inputContainerError: {
+        borderColor: Colors.error,
+        backgroundColor: Colors.error05,
     },
     inputWrapper: {
         flex: 1,
         position: 'relative',
+        justifyContent: 'center',
     },
     floatingLabelContainer: {
         position: 'absolute',
-        left: DesignTokens.spacing.md,
-        top: DesignTokens.spacing.md,
+        top: 18,
         zIndex: 1,
-        backgroundColor: Colors.backgroundCard,
-        paddingHorizontal: DesignTokens.spacing.xs,
+    },
+    floatingLabelBackground: {
+        backgroundColor: Colors.backgroundLight,
+        paddingHorizontal: 4,
     },
     floatingLabel: {
-        ...DesignTokens.typography.small,
+        fontSize: 15,
         color: Colors.textMuted,
+        fontWeight: '500',
     },
     floatingLabelFocused: {
         color: Colors.primary,
@@ -219,31 +304,52 @@ const styles = StyleSheet.create({
         color: Colors.error,
     },
     input: {
-        ...DesignTokens.typography.body,
+        flex: 1,
+        fontSize: 16,
+        fontWeight: '500',
         color: Colors.text,
-        paddingHorizontal: DesignTokens.spacing.md,
-        paddingVertical: DesignTokens.spacing.md,
-        minHeight: DesignTokens.touchTargets.min,
+        paddingHorizontal: 16,
+        paddingVertical: 16,
+        minHeight: 56,
     },
     inputWithLeftIcon: {
-        paddingLeft: DesignTokens.spacing.sm,
+        paddingLeft: 8,
     },
     inputWithRightIcon: {
-        paddingRight: DesignTokens.spacing.sm,
+        paddingRight: 8,
     },
     leftIconContainer: {
-        paddingLeft: DesignTokens.spacing.md,
+        width: 48,
+        height: 56,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     rightIconContainer: {
-        paddingRight: DesignTokens.spacing.md,
+        width: 48,
+        height: 56,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     errorIconContainer: {
-        paddingRight: DesignTokens.spacing.md,
+        width: 48,
+        height: 56,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    messageContainer: {
+        marginTop: DesignTokens.spacing.xs,
+        paddingHorizontal: 4,
     },
     errorText: {
-        ...DesignTokens.typography.caption,
+        fontSize: 13,
+        fontWeight: '500',
         color: Colors.error,
-        marginTop: DesignTokens.spacing.xs,
-        marginLeft: DesignTokens.spacing.sm,
+        lineHeight: 18,
+    },
+    hintText: {
+        fontSize: 13,
+        fontWeight: '400',
+        color: Colors.textMuted,
+        lineHeight: 18,
     },
 });

@@ -1,19 +1,19 @@
+import { GradientBackground } from '@/components/GradientBackground';
+import { Colors } from '@/constants/Colors';
+import { useAuth } from '@/contexts/AuthContext';
+import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import React from 'react';
 import {
-    StyleSheet,
-    View,
-    Text,
-    ScrollView,
-    TouchableOpacity,
-    Image,
-    Alert,
     ActivityIndicator,
+    Alert,
+    Image,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import { router } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { GradientBackground } from '../../components/GradientBackground';
-import { Colors } from '../../constants/Colors';
-import { useAuth } from '../../contexts/AuthContext';
 
 export default function MerchantProfileScreen() {
     const { user, loading, signOut } = useAuth();
@@ -230,7 +230,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         alignSelf: 'flex-start',
-        backgroundColor: Colors.secondary + '20',
+        backgroundColor: '#FEF3C7', // Amber-100
         paddingHorizontal: 10,
         paddingVertical: 4,
         borderRadius: 8,
@@ -239,7 +239,7 @@ const styles = StyleSheet.create({
     roleText: {
         fontSize: 12,
         fontWeight: '500',
-        color: Colors.secondary,
+        color: Colors.secondary, // #F59E0B (Amber-500)
     },
     menuSection: {
         marginHorizontal: 24,
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         marginHorizontal: 24,
         paddingVertical: 14,
-        backgroundColor: Colors.error + '15',
+        backgroundColor: Colors.error15,
         borderRadius: 14,
         gap: 8,
     },

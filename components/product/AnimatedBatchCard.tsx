@@ -1,11 +1,19 @@
+/**
+ * AnimatedBatchCard - VenceJá Design System
+ * 
+ * Card de batch com animações de entrada, visual moderno
+ * e foco em urgência de compra
+ */
+
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { Batch } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { memo, useEffect } from 'react';
 import {
-    Image,
-    ImageErrorEventData,
-    NativeSyntheticEvent,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -15,12 +23,8 @@ import Animated, {
     useAnimatedStyle,
     useSharedValue,
     withSpring,
-    withTiming
+    withTiming,
 } from 'react-native-reanimated';
-import { Colors } from '../../constants/Colors';
-import { DesignTokens } from '../../constants/designTokens';
-import { Batch } from '../../services/api';
-import { Badge } from '../base/Badge';
 
 interface AnimatedBatchCardProps {
     batch: Batch;
@@ -48,19 +52,13 @@ export const AnimatedBatchCard: React.FC<AnimatedBatchCardProps> = memo(({
     const translateY = useSharedValue(20);
     const pressScale = useSharedValue(1);
 
-    // Animação de entrada com stagger
+    // Entrance animation with stagger
     useEffect(() => {
         const delay = index * 50;
         setTimeout(() => {
-            scale.value = withSpring(1, {
-                damping: 15,
-                stiffness: 150,
-            });
-            opacity.value = withTiming(1, { duration: DesignTokens.animations.normal });
-            translateY.value = withSpring(0, {
-                damping: 15,
-                stiffness: 150,
-            });
+            scale.value = withSpring(1, { damping: 15, stiffness: 150 });
+            opacity.value = withTiming(1, { duration: 250 });
+            translateY.value = withSpring(0, { damping: 15, stiffness: 150 });
         }, delay);
     }, []);
 
@@ -70,166 +68,147 @@ export const AnimatedBatchCard: React.FC<AnimatedBatchCardProps> = memo(({
             { translateY: translateY.value },
         ],
         opacity: opacity.value,
-    }), []);
-
-    const pressAnimatedStyle = useAnimatedStyle(() => ({
-        transform: [{ scale: pressScale.value }],
-    }), []);
+    }));
 
     const handlePressIn = () => {
-        pressScale.value = withTiming(0.98, { duration: DesignTokens.animations.fast });
+        pressScale.value = withSpring(0.98, { damping: 15, stiffness: 400 });
     };
 
     const handlePressOut = () => {
-        pressScale.value = withSpring(1, {
-            damping: 15,
-            stiffness: 300,
-        });
+        pressScale.value = withSpring(1, { damping: 15, stiffness: 300 });
     };
 
-    // Handle both PT-BR and EN field names
-    const productData = (batch as any).products || batch.product;
+    // Extract data (handle both PT-BR and EN field names)
+    const productData = batch.products || batch.product;
     const productName = productData?.nome || productData?.name || 'Produto sem nome';
     const productPhoto = productData?.foto1 || productData?.photo1 || null;
     
-    // Prices
     const originalPrice = batch.original_price ?? batch.preco_normal_override ?? productData?.preco_normal ?? 0;
     const promoPrice = batch.promo_price ?? batch.preco_promocional ?? 0;
     
-    // Calculate discount
     let discountPercent = batch.discount_percent ?? batch.desconto_percentual ?? 0;
-    if ((discountPercent === 0 || !discountPercent || isNaN(discountPercent)) && originalPrice > 0 && promoPrice > 0 && originalPrice > promoPrice) {
+    if ((discountPercent === 0 || !discountPercent) && originalPrice > promoPrice) {
         discountPercent = ((originalPrice - promoPrice) / originalPrice) * 100;
     }
-    discountPercent = Math.max(0, Math.min(100, discountPercent || 0));
+    discountPercent = Math.round(Math.max(0, Math.min(100, discountPercent || 0)));
     
-    // Store info
-    const storeName = batch.store?.name || (batch.store as any)?.nome || 'Loja';
-    const storeHours = batch.store?.hours || (batch.store as any)?.horario_funcionamento || '';
+    const storeName = batch.store?.nome || batch.store?.name || 'Loja';
     const storeLogo = batch.store?.logo_url || null;
     const storeId = batch.store_id || (batch.store as any)?.id;
     
-    // Expiration date
+    // Expiration calculation
     const expirationDate = batch.expiration_date || batch.data_vencimento || null;
-    let expirationDisplay = 'N/A';
-    let expirationDateFormatted = '';
     let daysToExpire: number | null = null;
+    let expirationText = '';
+    
     if (expirationDate) {
         const expDate = new Date(expirationDate);
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         expDate.setHours(0, 0, 0, 0);
-        const diffTime = expDate.getTime() - today.getTime();
-        daysToExpire = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        
-        expirationDateFormatted = expDate.toLocaleDateString('pt-BR', { 
-            day: '2-digit', 
-            month: '2-digit', 
-            year: 'numeric' 
-        });
+        daysToExpire = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
         
         if (daysToExpire < 0) {
-            expirationDisplay = 'Vencido';
+            expirationText = 'Vencido';
         } else if (daysToExpire === 0) {
-            expirationDisplay = 'Vence hoje';
+            expirationText = 'Vence hoje!';
         } else if (daysToExpire === 1) {
-            expirationDisplay = 'Vence amanhã';
+            expirationText = 'Vence amanhã';
+        } else if (daysToExpire <= 7) {
+            expirationText = `${daysToExpire} dias`;
         } else {
-            expirationDisplay = `${daysToExpire} dias`;
+            expirationText = expDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
         }
     }
-    
-    const imageKey = batch.id;
+
+    const isUrgent = daysToExpire !== null && daysToExpire <= 2;
+    const isExpiringSoon = daysToExpire !== null && daysToExpire <= 7;
+    const isExpired = daysToExpire !== null && daysToExpire < 0;
+    const savings = originalPrice - promoPrice;
     const imageUri = productPhoto && !imageError ? productPhoto : null;
-    
-    const handleImageError = (e: NativeSyntheticEvent<ImageErrorEventData>) => {
-        onImageError(imageKey);
-    };
 
     const handleAddToCartPress = () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         onAddToCart(batch);
+    };
+
+    const handleNavigateToProduct = () => {
+        router.push(`/product/${batch.id}`);
     };
 
     return (
         <Animated.View style={[styles.card, animatedStyle]} collapsable={false}>
-            {/* Product Image */}
+            {/* Image Section */}
             <TouchableOpacity
-                style={styles.imageContainer}
-                onPress={() => router.push(`/product/${batch.id}`)}
-                activeOpacity={0.9}
+                style={styles.imageSection}
+                onPress={handleNavigateToProduct}
+                activeOpacity={0.95}
             >
                 {imageUri ? (
                     <Image
                         source={{ uri: imageUri }}
-                        style={styles.productImage}
-                        resizeMode="cover"
-                        onError={handleImageError}
+                        style={styles.image}
+                        contentFit="cover"
+                        transition={200}
+                        onError={() => onImageError(batch.id)}
                     />
                 ) : (
                     <View style={styles.imagePlaceholder}>
-                        <Ionicons name="image-outline" size={40} color={Colors.textMuted} />
-                        <Text style={styles.imagePlaceholderText}>Sem imagem</Text>
+                        <Ionicons name="image-outline" size={48} color={Colors.textMuted} />
                     </View>
                 )}
-                
+
                 {/* Discount Badge */}
                 {discountPercent > 0 && (
-                    <Badge
-                        label={`-${Math.round(discountPercent)}%`}
-                        variant="error"
-                        size="md"
-                        style={styles.discountBadge}
-                    />
+                    <View style={[styles.discountBadge, isUrgent && styles.discountBadgeUrgent]}>
+                        <Text style={styles.discountText}>-{discountPercent}%</Text>
+                    </View>
                 )}
-                
-                {/* Store Logo overlay na imagem */}
-                {storeLogo && storeId && (
+
+                {/* Expiration Tag */}
+                {expirationText && (
+                    <View style={[
+                        styles.expirationTag,
+                        isUrgent && styles.expirationTagUrgent,
+                        isExpiringSoon && !isUrgent && styles.expirationTagWarning,
+                    ]}>
+                        <Ionicons name="time" size={12} color="#FFFFFF" />
+                        <Text style={styles.expirationText}>{expirationText}</Text>
+                    </View>
+                )}
+
+                {/* Store Logo */}
+                {storeLogo && (
                     <TouchableOpacity
-                        style={styles.storeLogoOverlay}
-                        onPress={() => {
-                            router.push({
-                                pathname: '/(customer)/store-products',
-                                params: { storeId }
-                            });
-                        }}
-                        activeOpacity={0.8}
+                        style={styles.storeLogoContainer}
+                        onPress={() => storeId && router.push({
+                            pathname: '/(customer)/store-products',
+                            params: { storeId }
+                        })}
                     >
-                        <View style={styles.storeLogoOverlayContainer}>
-                            <Image
-                                source={{ uri: storeLogo }}
-                                style={styles.storeLogoOverlayImage}
-                                resizeMode="cover"
-                            />
-                        </View>
+                        <Image source={{ uri: storeLogo }} style={styles.storeLogo} contentFit="cover" />
                     </TouchableOpacity>
                 )}
             </TouchableOpacity>
 
-            <View style={styles.productInfo}>
-                {/* Store name */}
-                <Text style={styles.storeName} numberOfLines={1}>
-                    {storeName}
-                </Text>
-                
-                {/* Product name */}
-                <Text style={styles.productName} numberOfLines={2}>
-                    {productName}
-                </Text>
-                
-                {/* Store hours */}
-                {storeHours && (
-                    <View style={styles.storeHoursRow}>
-                        <Ionicons name="time-outline" size={14} color={Colors.textMuted} />
-                        <Text style={styles.storeHoursText} numberOfLines={1}>
-                            {storeHours}
-                        </Text>
-                    </View>
-                )}
-                
-                {/* Price row */}
-                <View style={styles.priceRow}>
-                    <View style={styles.priceContainer}>
+            {/* Content Section */}
+            <View style={styles.content}>
+                {/* Store Name */}
+                <View style={styles.storeRow}>
+                    {!storeLogo && (
+                        <View style={styles.storeIconContainer}>
+                            <Ionicons name="storefront" size={12} color={Colors.textMuted} />
+                        </View>
+                    )}
+                    <Text style={styles.storeName} numberOfLines={1}>{storeName}</Text>
+                </View>
+
+                {/* Product Name */}
+                <Text style={styles.productName} numberOfLines={2}>{productName}</Text>
+
+                {/* Price Section */}
+                <View style={styles.priceSection}>
+                    <View style={styles.priceRow}>
                         {originalPrice > promoPrice && (
                             <Text style={styles.originalPrice}>
                                 R$ {originalPrice.toFixed(2).replace('.', ',')}
@@ -239,106 +218,87 @@ export const AnimatedBatchCard: React.FC<AnimatedBatchCardProps> = memo(({
                             R$ {promoPrice.toFixed(2).replace('.', ',')}
                         </Text>
                     </View>
-                </View>
-
-                {/* Expiration date */}
-                {expirationDate && (
-                    <View style={styles.expirationRow}>
-                        <Ionicons 
-                            name="calendar-outline" 
-                            size={14} 
-                            color={daysToExpire !== null && daysToExpire <= 2 ? Colors.error : Colors.warning} 
-                        />
-                        <View style={styles.expirationInfo}>
-                            <Text style={[
-                                styles.expirationText,
-                                daysToExpire !== null && daysToExpire <= 2 && styles.expirationTextUrgent
-                            ]}>
-                                {expirationDisplay}
+                    {savings > 0 && (
+                        <View style={styles.savingsBadge}>
+                            <Text style={styles.savingsText}>
+                                Economize R$ {savings.toFixed(2).replace('.', ',')}
                             </Text>
-                            <Text style={styles.expirationDateText}>
-                                {expirationDateFormatted}
-                            </Text>
-                        </View>
-                    </View>
-                )}
-
-                {/* Stock and quantity selector */}
-                <View style={styles.stockQuantityRow}>
-                    <View style={styles.stockInfo}>
-                        <Ionicons name="cube-outline" size={12} color={Colors.textMuted} />
-                        <Text style={styles.stockText}>
-                            {availableStock > 0 ? `${availableStock} disponível(eis)` : 'Esgotado'}
-                        </Text>
-                    </View>
-                    
-                    {/* Quantity selector */}
-                    {availableStock > 0 && (
-                        <View style={styles.quantitySelector}>
-                            <TouchableOpacity
-                                style={[styles.quantityButton, selectedQuantity <= 1 && styles.quantityButtonDisabled]}
-                                onPress={(e) => {
-                                    e.stopPropagation();
-                                    onQuantityChange(batch.id, -1);
-                                }}
-                                disabled={selectedQuantity <= 1}
-                            >
-                                <Ionicons 
-                                    name="remove" 
-                                    size={16} 
-                                    color={selectedQuantity <= 1 ? Colors.textMuted : Colors.text} 
-                                />
-                            </TouchableOpacity>
-                            <Text style={styles.quantityText}>{selectedQuantity}</Text>
-                            <TouchableOpacity
-                                style={[styles.quantityButton, selectedQuantity >= availableStock && styles.quantityButtonDisabled]}
-                                onPress={(e) => {
-                                    e.stopPropagation();
-                                    onQuantityChange(batch.id, 1);
-                                }}
-                                disabled={selectedQuantity >= availableStock}
-                            >
-                                <Ionicons 
-                                    name="add" 
-                                    size={16} 
-                                    color={selectedQuantity >= availableStock ? Colors.textMuted : Colors.text} 
-                                />
-                            </TouchableOpacity>
                         </View>
                     )}
                 </View>
 
-                {/* Add button - SÓ APARECE SE NÃO ESTIVER VENCIDO */}
-                {daysToExpire === null || daysToExpire >= 0 ? (
-                    <View style={styles.addButtonContainer}>
-                        <Animated.View style={pressAnimatedStyle}>
+                {/* Stock Info */}
+                <View style={styles.stockRow}>
+                    <Ionicons 
+                        name="cube-outline" 
+                        size={14} 
+                        color={availableStock <= 3 ? Colors.warning : Colors.textMuted} 
+                    />
+                    <Text style={[
+                        styles.stockText,
+                        availableStock <= 3 && styles.stockTextLow
+                    ]}>
+                        {availableStock > 0 ? `${availableStock} disponível` : 'Esgotado'}
+                    </Text>
+                </View>
+
+                {/* Quantity Selector */}
+                {availableStock > 0 && !isExpired && (
+                    <View style={styles.quantitySection}>
+                        <View style={styles.quantitySelector}>
                             <TouchableOpacity
-                                style={[
-                                    styles.addButton,
-                                    availableStock === 0 && styles.addButtonDisabled
-                                ]}
-                                onPress={handleAddToCartPress}
-                                onPressIn={handlePressIn}
-                                onPressOut={handlePressOut}
-                                disabled={availableStock === 0}
-                                accessibilityRole="button"
-                                accessibilityLabel={`Adicionar ${productName} ao carrinho`}
-                                accessibilityHint={`Produto custa R$ ${promoPrice.toFixed(2)}`}
+                                style={[styles.qtyButton, selectedQuantity <= 1 && styles.qtyButtonDisabled]}
+                                onPress={() => onQuantityChange(batch.id, -1)}
+                                disabled={selectedQuantity <= 1}
                             >
                                 <Ionicons 
-                                    name="cart" 
+                                    name="remove" 
                                     size={18} 
-                                    color={Colors.text} 
+                                    color={selectedQuantity <= 1 ? Colors.textMuted : Colors.text} 
                                 />
-                                <Text style={styles.addButtonText} numberOfLines={1}>
-                                    {availableStock > 0 
-                                        ? (selectedQuantity > 1 ? `Adicionar ${selectedQuantity}x` : 'Adicionar') 
-                                        : 'Esgotado'}
-                                </Text>
                             </TouchableOpacity>
-                        </Animated.View>
+                            <Text style={styles.qtyValue}>{selectedQuantity}</Text>
+                            <TouchableOpacity
+                                style={[styles.qtyButton, selectedQuantity >= availableStock && styles.qtyButtonDisabled]}
+                                onPress={() => onQuantityChange(batch.id, 1)}
+                                disabled={selectedQuantity >= availableStock}
+                            >
+                                <Ionicons 
+                                    name="add" 
+                                    size={18} 
+                                    color={selectedQuantity >= availableStock ? Colors.textMuted : Colors.text} 
+                                />
+                            </TouchableOpacity>
+                        </View>
                     </View>
-                ) : null}
+                )}
+
+                {/* Add to Cart Button */}
+                {!isExpired && (
+                    <TouchableOpacity
+                        style={[styles.addButton, availableStock === 0 && styles.addButtonDisabled]}
+                        onPress={handleAddToCartPress}
+                        onPressIn={handlePressIn}
+                        onPressOut={handlePressOut}
+                        disabled={availableStock === 0}
+                        activeOpacity={0.8}
+                    >
+                        <Ionicons name="cart" size={18} color="#FFFFFF" />
+                        <Text style={styles.addButtonText}>
+                            {availableStock > 0 
+                                ? (selectedQuantity > 1 ? `Adicionar ${selectedQuantity}x` : 'Adicionar') 
+                                : 'Esgotado'}
+                        </Text>
+                    </TouchableOpacity>
+                )}
+
+                {/* Expired Message */}
+                {isExpired && (
+                    <View style={styles.expiredBanner}>
+                        <Ionicons name="warning" size={16} color={Colors.error} />
+                        <Text style={styles.expiredText}>Produto vencido</Text>
+                    </View>
+                )}
             </View>
         </Animated.View>
     );
@@ -348,248 +308,239 @@ AnimatedBatchCard.displayName = 'AnimatedBatchCard';
 
 const styles = StyleSheet.create({
     card: {
-        width: '100%',
         backgroundColor: Colors.backgroundCard,
         borderRadius: DesignTokens.borderRadius.xl,
-        borderWidth: 1.5,
-        borderColor: Colors.glassBorder,
         overflow: 'hidden',
         marginBottom: DesignTokens.spacing.md,
         ...DesignTokens.shadows.md,
+    },
+
+    // ========== IMAGE SECTION ==========
+    imageSection: {
+        width: '100%',
+        height: 180,
         position: 'relative',
+        backgroundColor: Colors.surfaceMuted,
     },
-    storeLogoContainer: {
-        position: 'absolute',
-        top: DesignTokens.spacing.md,
-        left: DesignTokens.spacing.md,
-        zIndex: 10,
-    },
-    storeLogo: {
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        backgroundColor: Colors.backgroundCard,
-        borderWidth: 3,
-        borderColor: Colors.backgroundCard,
-        overflow: 'hidden',
-        ...DesignTokens.shadows.lg,
-    },
-    storeLogoImage: {
+    image: {
         width: '100%',
         height: '100%',
-    },
-    storeLogoOverlay: {
-        position: 'absolute',
-        top: DesignTokens.spacing.md,
-        left: DesignTokens.spacing.md,
-        zIndex: 10,
-    },
-    storeLogoOverlayContainer: {
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        backgroundColor: Colors.backgroundCard,
-        borderWidth: 3,
-        borderColor: Colors.backgroundCard,
-        overflow: 'hidden',
-        ...DesignTokens.shadows.lg,
-    },
-    storeLogoOverlayImage: {
-        width: '100%',
-        height: '100%',
-    },
-    imageContainer: {
-        width: '100%',
-        height: 200,
-        backgroundColor: Colors.glass,
-        position: 'relative',
-        overflow: 'hidden',
-        borderRadius: 0,
-    },
-    productImage: {
-        width: '100%',
-        height: '100%',
-        backgroundColor: Colors.glass,
     },
     imagePlaceholder: {
         width: '100%',
         height: '100%',
-        backgroundColor: Colors.glass,
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    imagePlaceholderText: {
-        ...DesignTokens.typography.caption,
-        color: Colors.textMuted,
-        marginTop: DesignTokens.spacing.xs,
+        backgroundColor: Colors.surfaceMuted,
     },
     discountBadge: {
         position: 'absolute',
-        top: DesignTokens.spacing.md,
-        right: DesignTokens.spacing.md,
-        zIndex: 5,
+        top: 10,
+        right: 10,
+        backgroundColor: Colors.secondary,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: DesignTokens.borderRadius.md,
+        ...DesignTokens.shadows.sm,
     },
-    productInfo: {
-        padding: DesignTokens.spacing.md,
-        paddingBottom: DesignTokens.spacing.md,
-        flexShrink: 0,
+    discountBadgeUrgent: {
+        backgroundColor: Colors.error,
     },
-    storeName: {
-        ...DesignTokens.typography.captionBold,
-        color: Colors.textMuted,
-        marginBottom: DesignTokens.spacing.xs,
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
+    discountText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '800',
     },
-    productName: {
-        ...DesignTokens.typography.bodyBold,
-        color: Colors.text,
-        marginBottom: DesignTokens.spacing.xs,
-        minHeight: 40,
-        lineHeight: 20,
-    },
-    storeHoursRow: {
+    expirationTag: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: DesignTokens.spacing.xs + 2,
-        marginBottom: DesignTokens.spacing.xs,
-        marginTop: DesignTokens.spacing.xs,
+        justifyContent: 'center',
+        gap: 4,
+        backgroundColor: 'rgba(0,0,0,0.65)',
+        paddingVertical: 8,
     },
-    storeHoursText: {
-        ...DesignTokens.typography.small,
-        color: Colors.textMuted,
+    expirationTagUrgent: {
+        backgroundColor: Colors.error,
+    },
+    expirationTagWarning: {
+        backgroundColor: 'rgba(245,158,11,0.9)',
+    },
+    expirationText: {
+        color: '#FFFFFF',
+        fontSize: 12,
         fontWeight: '600',
+    },
+    storeLogoContainer: {
+        position: 'absolute',
+        top: 10,
+        left: 10,
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#FFFFFF',
+        overflow: 'hidden',
+        ...DesignTokens.shadows.md,
+    },
+    storeLogo: {
+        width: '100%',
+        height: '100%',
+    },
+
+    // ========== CONTENT SECTION ==========
+    content: {
+        padding: DesignTokens.spacing.md,
+    },
+    storeRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginBottom: 6,
+    },
+    storeIconContainer: {
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        backgroundColor: Colors.surfaceMuted,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    storeName: {
+        fontSize: 11,
+        fontWeight: '500',
+        color: Colors.textMuted,
+        flex: 1,
+    },
+    productName: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: Colors.text,
+        lineHeight: 20,
+        marginBottom: 10,
+        minHeight: 40,
+    },
+
+    // ========== PRICE SECTION ==========
+    priceSection: {
+        marginBottom: 10,
     },
     priceRow: {
         flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: DesignTokens.spacing.sm,
-        marginTop: DesignTokens.spacing.xs,
-    },
-    priceContainer: {
-        flexDirection: 'row',
         alignItems: 'baseline',
-        gap: DesignTokens.spacing.xs + 2,
-        flex: 1,
+        gap: 8,
     },
     originalPrice: {
-        ...DesignTokens.typography.caption,
+        fontSize: 13,
+        fontWeight: '500',
         color: Colors.textMuted,
         textDecorationLine: 'line-through',
     },
     promoPrice: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: Colors.success,
+        fontSize: 22,
+        fontWeight: '800',
+        color: Colors.primary,
+        letterSpacing: -0.5,
     },
-    expirationRow: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: DesignTokens.spacing.xs + 2,
-        marginBottom: DesignTokens.spacing.xs,
-        paddingVertical: DesignTokens.spacing.xs + 1,
-        paddingHorizontal: DesignTokens.spacing.sm,
-        backgroundColor: Colors.glass,
-        borderRadius: DesignTokens.borderRadius.sm,
-        borderWidth: 1,
-        borderColor: Colors.glassBorder,
-    },
-    expirationInfo: {
-        flex: 1,
-    },
-    expirationText: {
-        ...DesignTokens.typography.captionBold,
-        color: Colors.warning,
-        marginBottom: 2,
-    },
-    expirationTextUrgent: {
-        color: Colors.error,
-    },
-    expirationDateText: {
-        ...DesignTokens.typography.caption,
-        color: Colors.textMuted,
-        fontWeight: '500',
-    },
-    stockQuantityRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: DesignTokens.spacing.xs,
-        paddingVertical: DesignTokens.spacing.xs + 1,
-        paddingHorizontal: DesignTokens.spacing.sm,
-        backgroundColor: Colors.glass,
+    savingsBadge: {
+        marginTop: 4,
+        alignSelf: 'flex-start',
+        backgroundColor: Colors.savingsBackground,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
         borderRadius: DesignTokens.borderRadius.sm,
     },
-    stockInfo: {
+    savingsText: {
+        fontSize: 10,
+        fontWeight: '600',
+        color: Colors.savings,
+    },
+
+    // ========== STOCK ==========
+    stockRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: DesignTokens.spacing.xs,
-        flex: 1,
+        gap: 6,
+        marginBottom: 12,
     },
     stockText: {
-        ...DesignTokens.typography.caption,
-        color: Colors.textMuted,
+        fontSize: 12,
         fontWeight: '500',
+        color: Colors.textMuted,
+    },
+    stockTextLow: {
+        color: Colors.warning,
+    },
+
+    // ========== QUANTITY ==========
+    quantitySection: {
+        marginBottom: 12,
     },
     quantitySelector: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: DesignTokens.spacing.sm,
-        backgroundColor: Colors.backgroundCard,
-        borderRadius: DesignTokens.borderRadius.sm,
-        paddingHorizontal: DesignTokens.spacing.xs,
-        paddingVertical: DesignTokens.spacing.xs,
-        borderWidth: 1,
-        borderColor: Colors.glassBorder,
+        alignSelf: 'flex-start',
+        backgroundColor: Colors.surfaceMuted,
+        borderRadius: DesignTokens.borderRadius.lg,
+        padding: 4,
     },
-    quantityButton: {
-        minWidth: DesignTokens.touchTargets.min,
-        minHeight: DesignTokens.touchTargets.min,
-        width: DesignTokens.touchTargets.min,
-        height: DesignTokens.touchTargets.min,
-        borderRadius: DesignTokens.borderRadius.sm,
-        backgroundColor: Colors.glass,
+    qtyButton: {
+        width: 36,
+        height: 36,
+        borderRadius: DesignTokens.borderRadius.md,
+        backgroundColor: Colors.backgroundLight,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    quantityButtonDisabled: {
+    qtyButtonDisabled: {
         opacity: 0.4,
     },
-    quantityText: {
-        ...DesignTokens.typography.smallBold,
+    qtyValue: {
+        fontSize: 16,
+        fontWeight: '700',
         color: Colors.text,
-        minWidth: 24,
+        minWidth: 40,
         textAlign: 'center',
     },
-    addButtonContainer: {
-        width: '100%',
-        marginTop: DesignTokens.spacing.sm,
-        paddingTop: DesignTokens.spacing.xs,
-        paddingBottom: DesignTokens.spacing.xs,
-    },
+
+    // ========== ADD BUTTON ==========
     addButton: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
+        gap: 6,
         backgroundColor: Colors.primary,
-        borderRadius: DesignTokens.borderRadius.md,
-        paddingVertical: DesignTokens.spacing.md,
-        paddingHorizontal: DesignTokens.spacing.md,
-        gap: DesignTokens.spacing.sm,
-        ...DesignTokens.shadows.sm,
-        minHeight: 48,
-        width: '100%',
-        elevation: 3,
+        borderRadius: DesignTokens.borderRadius.lg,
+        paddingVertical: 14,
+        ...DesignTokens.shadows.primary,
     },
     addButtonDisabled: {
-        backgroundColor: Colors.glass,
-        opacity: 0.6,
+        backgroundColor: Colors.surfaceMuted,
+        ...DesignTokens.shadows.none,
     },
     addButtonText: {
-        ...DesignTokens.typography.smallBold,
-        color: Colors.text,
-        letterSpacing: 0.3,
-        fontSize: 13,
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '700',
+    },
+
+    // ========== EXPIRED ==========
+    expiredBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backgroundColor: Colors.error05,
+        borderRadius: DesignTokens.borderRadius.md,
+        paddingVertical: 12,
+        borderWidth: 1,
+        borderColor: Colors.error20,
+    },
+    expiredText: {
+        color: Colors.error,
+        fontSize: 14,
+        fontWeight: '600',
     },
 });

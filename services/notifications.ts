@@ -14,7 +14,7 @@ Notifications.setNotificationHandler({
     }),
 });
 
-export interface NotificationData {
+export interface NotificationData extends Record<string, unknown> {
     type: 'new_order' | 'order_paid' | 'order_picked_up' | 'promo' | 'general';
     orderId?: string;
     storeId?: string;
@@ -133,11 +133,35 @@ class NotificationService {
         this.responseListener = Notifications.addNotificationResponseReceivedListener(
             (response) => {
                 console.log('Notification response:', response);
-                const data = response.notification.request.content.data as NotificationData;
+                const data = this.parseNotificationData(response.notification.request.content.data);
                 this.handleNotificationResponse(data);
                 onNotificationResponse?.(response);
             }
         );
+    }
+
+    private parseNotificationData(raw: Record<string, unknown>): NotificationData {
+        const allowedTypes: NotificationData['type'][] = [
+            'new_order',
+            'order_paid',
+            'order_picked_up',
+            'promo',
+            'general',
+        ];
+
+        const rawType = raw?.type;
+        const type = allowedTypes.includes(rawType as NotificationData['type'])
+            ? (rawType as NotificationData['type'])
+            : 'general';
+
+        return {
+            ...raw,
+            type,
+            orderId: typeof raw.orderId === 'string' ? raw.orderId : undefined,
+            storeId: typeof raw.storeId === 'string' ? raw.storeId : undefined,
+            title: typeof raw.title === 'string' ? raw.title : undefined,
+            body: typeof raw.body === 'string' ? raw.body : undefined,
+        };
     }
 
     /**
@@ -166,12 +190,10 @@ class NotificationService {
      * Remove notification listeners
      */
     removeListeners(): void {
-        if (this.notificationListener) {
-            Notifications.removeNotificationSubscription(this.notificationListener);
-        }
-        if (this.responseListener) {
-            Notifications.removeNotificationSubscription(this.responseListener);
-        }
+        this.notificationListener?.remove();
+        this.notificationListener = null;
+        this.responseListener?.remove();
+        this.responseListener = null;
     }
 
     /**

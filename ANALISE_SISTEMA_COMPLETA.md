@@ -226,7 +226,7 @@ Todas as tabelas têm RLS habilitado com políticas específicas:
 ## 🔌 Rotas da API Backend
 
 ### Base URL
-- **Desenvolvimento**: `http://192.168.10.7:3000` (configurado em `constants/config.ts`)
+- **Desenvolvimento**: `http://192.168.10.8:3000` (configurado em `constants/config.ts`)
 - **Produção**: Configurar via variável de ambiente
 
 ### Autenticação
@@ -640,7 +640,7 @@ O backend usa campos em **português**, enquanto o frontend usa **inglês**. O `
 
 ### Mobile (`constants/config.ts`)
 ```typescript
-export const API_BASE_URL = 'http://192.168.10.7:3000';
+export const API_BASE_URL = 'http://192.168.10.8:3000';
 export const SUPABASE_URL = 'https://rkmvrfqhcleibdtlcwwh.supabase.co';
 export const SUPABASE_ANON_KEY = '...';
 export const GOOGLE_CLIENT_ID = '...';

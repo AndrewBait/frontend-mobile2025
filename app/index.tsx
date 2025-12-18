@@ -1,16 +1,16 @@
+import { GradientBackground } from '@/components/GradientBackground';
+import { Colors } from '@/constants/Colors';
+import { API_BASE_URL } from '@/constants/config';
+import { useAuth } from '@/contexts/AuthContext';
+import { api } from '@/services/api';
+import { getSession, supabase } from '@/services/supabase';
+import { getGlobalRedirectInProgress, setGlobalRedirectInProgress } from '@/utils/redirectLock';
 import { Ionicons } from '@expo/vector-icons';
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { GradientBackground } from '../components/GradientBackground';
-import { Colors } from '../constants/Colors';
-import { API_BASE_URL } from '../constants/config';
-import { useAuth } from '../contexts/AuthContext';
-import { api } from '../services/api';
-import { getSession, supabase } from '../services/supabase';
-import { getGlobalRedirectInProgress, setGlobalRedirectInProgress } from '../utils/redirectLock';
 
 const { height } = Dimensions.get('window');
 
@@ -406,7 +406,7 @@ export default function LoginScreen() {
                 <View style={styles.header}>
                     <View style={styles.logoContainer}>
                         <View style={styles.logoGlow} />
-                        <Ionicons name="leaf" size={56} color={Colors.success} />
+                        <Ionicons name="leaf" size={56} color={Colors.primary} />
                     </View>
                     <Text style={styles.appName}>VenceJá</Text>
                     <Text style={styles.title}>Economize até 95%</Text>
@@ -417,8 +417,8 @@ export default function LoginScreen() {
 
                 <View style={styles.features}>
                     <View style={styles.featureItem}>
-                        <View style={[styles.featureIcon, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-                            <Ionicons name="pricetag" size={24} color={Colors.success} />
+                        <View style={[styles.featureIcon, { backgroundColor: 'rgba(5, 150, 105, 0.1)' }]}>
+                            <Ionicons name="pricetag" size={24} color={Colors.primary} />
                         </View>
                         <View style={styles.featureText}>
                             <Text style={styles.featureTitle}>Até 95% de desconto</Text>
@@ -427,8 +427,8 @@ export default function LoginScreen() {
                     </View>
 
                     <View style={styles.featureItem}>
-                        <View style={[styles.featureIcon, { backgroundColor: 'rgba(99, 102, 241, 0.15)' }]}>
-                            <Ionicons name="location" size={24} color={Colors.primary} />
+                        <View style={[styles.featureIcon, { backgroundColor: 'rgba(245, 158, 11, 0.1)' }]}>
+                            <Ionicons name="location" size={24} color={Colors.secondary} />
                         </View>
                         <View style={styles.featureText}>
                             <Text style={styles.featureTitle}>Retire na loja</Text>
@@ -437,8 +437,8 @@ export default function LoginScreen() {
                     </View>
 
                     <View style={styles.featureItem}>
-                        <View style={[styles.featureIcon, { backgroundColor: 'rgba(236, 72, 153, 0.15)' }]}>
-                            <Ionicons name="earth" size={24} color={Colors.secondary} />
+                        <View style={[styles.featureIcon, { backgroundColor: 'rgba(34, 197, 94, 0.1)' }]}>
+                            <Ionicons name="earth" size={24} color={Colors.success} />
                         </View>
                         <View style={styles.featureText}>
                             <Text style={styles.featureTitle}>Ajude o planeta</Text>
@@ -515,9 +515,9 @@ const styles = StyleSheet.create({
         width: 110,
         height: 110,
         borderRadius: 36,
-        backgroundColor: Colors.glass,
+        backgroundColor: '#FFFFFF', // Fundo branco
         borderWidth: 1,
-        borderColor: Colors.glassBorder,
+        borderColor: Colors.primary, // Borda verde suave
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 20,
@@ -527,13 +527,13 @@ const styles = StyleSheet.create({
         width: 140,
         height: 140,
         borderRadius: 70,
-        backgroundColor: Colors.success,
-        opacity: 0.15,
+        backgroundColor: Colors.primary, // Verde
+        opacity: 0.1,
     },
     appName: {
         fontSize: 32,
         fontWeight: '800',
-        color: Colors.success,
+        color: Colors.primary, // Verde
         marginBottom: 8,
         letterSpacing: 1,
     },
@@ -555,10 +555,10 @@ const styles = StyleSheet.create({
     featureItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: Colors.glass,
+        backgroundColor: '#FFFFFF', // Fundo branco
         borderRadius: 16,
         borderWidth: 1,
-        borderColor: Colors.glassBorder,
+        borderColor: Colors.border, // #E5E7EB
         padding: 16,
         marginBottom: 12,
     },

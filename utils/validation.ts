@@ -181,6 +181,12 @@ export const validateFutureDate = (dateStr: string): boolean => {
     return date >= today;
 };
 
+// Validate UUID format (for Asaas Wallet ID)
+export const validateUUID = (uuid: string): boolean => {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(uuid.trim());
+};
+
 // Calculate pickup deadline (1 hour before closing)
 export const calculatePickupDeadline = (closingTime: string): string => {
     const [hours, minutes] = closingTime.split(':').map(Number);

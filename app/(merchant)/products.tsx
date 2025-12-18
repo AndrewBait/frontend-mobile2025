@@ -1,23 +1,23 @@
-import React, { useState, useCallback, useEffect } from 'react';
-import {
-    StyleSheet,
-    View,
-    Text,
-    FlatList,
-    TouchableOpacity,
-    Image,
-    ActivityIndicator,
-    RefreshControl,
-    Alert,
-} from 'react-native';
-import { router } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { GradientBackground } from '@/components/GradientBackground';
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { useAuth } from '@/contexts/AuthContext';
+import { api, Batch, Store } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { GradientBackground } from '../../components/GradientBackground';
-import { Colors } from '../../constants/Colors';
-import { api, Store, Batch } from '../../services/api';
-import { useAuth } from '../../contexts/AuthContext';
+import { useFocusEffect } from '@react-navigation/native';
+import { router } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Image,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 
 export default function MerchantProductsScreen() {
     const { session, isLoggingOut } = useAuth();
@@ -232,7 +232,7 @@ export default function MerchantProductsScreen() {
                         {/* Expiration */}
                         <View style={[
                             styles.tag,
-                            { backgroundColor: isExpiringSoon ? Colors.error + '20' : Colors.warning + '20' }
+                            { backgroundColor: isExpiringSoon ? Colors.error20 : Colors.warning20 }
                         ]}>
                             <Ionicons
                                 name="calendar"
@@ -250,7 +250,7 @@ export default function MerchantProductsScreen() {
                         {/* Stock */}
                         <View style={[
                             styles.tag,
-                            { backgroundColor: isLowStock ? Colors.error + '20' : Colors.success + '20' }
+                            { backgroundColor: isLowStock ? Colors.error20 : Colors.success20 }
                         ]}>
                             <Ionicons
                                 name="cube"
@@ -366,12 +366,9 @@ export default function MerchantProductsScreen() {
                     onPress={() => router.push('/(merchant)/create-product')}
                     activeOpacity={0.8}
                 >
-                    <LinearGradient
-                        colors={[Colors.primary, Colors.primaryDark]}
-                        style={styles.fabGradient}
-                    >
-                        <Ionicons name="add" size={28} color={Colors.text} />
-                    </LinearGradient>
+                    <View style={styles.fabGradient}>
+                        <Ionicons name="add" size={32} color="#FFFFFF" />
+                    </View>
                 </TouchableOpacity>
             </View>
         </GradientBackground>
@@ -430,8 +427,8 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: 24,
-        marginBottom: 20,
+        paddingHorizontal: DesignTokens.padding.medium, // Responsivo
+        marginBottom: DesignTokens.spacing.lg,
     },
     title: {
         fontSize: 28,
@@ -487,8 +484,9 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     listContent: {
-        paddingHorizontal: 24,
-        paddingBottom: 100,
+        paddingHorizontal: DesignTokens.padding.medium, // Responsivo
+        paddingBottom: 120, // Espaço para FAB
+        gap: DesignTokens.grid.gap.medium, // Gap entre cards
     },
     productCard: {
         flexDirection: 'row',
@@ -562,7 +560,7 @@ const styles = StyleSheet.create({
         width: 36,
         height: 36,
         borderRadius: 10,
-        backgroundColor: Colors.primary + '20',
+        backgroundColor: Colors.primary20,
         alignItems: 'center',
         justifyContent: 'center',
         alignSelf: 'center',

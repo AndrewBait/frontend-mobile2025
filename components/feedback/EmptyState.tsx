@@ -8,9 +8,9 @@ import Animated, {
     withRepeat,
     withTiming,
 } from 'react-native-reanimated';
-import { Colors } from '../../constants/Colors';
-import { DesignTokens } from '../../constants/designTokens';
-import { Button } from '../base/Button';
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { Button } from '@/components/base/Button';
 
 interface EmptyStateProps {
     icon?: keyof typeof Ionicons.glyphMap;

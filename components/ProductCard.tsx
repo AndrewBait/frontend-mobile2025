@@ -1,11 +1,41 @@
-import React from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Image, Dimensions } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/Colors';
-import { Product } from '../services/database';
+/**
+ * ProductCard - VenceJá Design System
+ * 
+ * Card de produto com design moderno inspirado em
+ * apps de delivery, com foco em urgência e economia
+ */
 
-const { width } = Dimensions.get('window');
-const CARD_WIDTH = (width - 48 - 12) / 2;
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
+import React from 'react';
+import {
+    Dimensions,
+    Image,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import Animated, {
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring,
+} from 'react-native-reanimated';
+
+interface Product {
+    id: string;
+    name: string;
+    storeName: string;
+    storePhoto?: string;
+    photo1?: string;
+    originalPrice: number;
+    promoPrice: number;
+    discountPercent: number;
+    expirationDate: string;
+    stock?: number;
+}
 
 interface ProductCardProps {
     product: Product;
@@ -13,7 +43,14 @@ interface ProductCardProps {
     onAddToCart: () => void;
     onToggleFavorite: () => void;
     isFavorite?: boolean;
+    variant?: 'default' | 'compact';
 }
+
+const { width } = Dimensions.get('window');
+const CARD_WIDTH = (width - 48) / 2; // 2 colunas com margin
+const CARD_WIDTH_FULL = width - 32; // 1 coluna
+
+const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
 
 export const ProductCard: React.FC<ProductCardProps> = ({
     product,
@@ -21,161 +58,351 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     onAddToCart,
     onToggleFavorite,
     isFavorite = false,
+    variant = 'default',
 }) => {
+    const scale = useSharedValue(1);
+    const cardWidth = variant === 'compact' ? CARD_WIDTH : CARD_WIDTH;
+
+    // Calculate days until expiration
+    const getDaysUntilExpiration = () => {
+        const today = new Date();
+        const expDate = new Date(product.expirationDate);
+        const diffTime = expDate.getTime() - today.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays;
+    };
+
+    const daysLeft = getDaysUntilExpiration();
+    const isUrgent = daysLeft <= 3;
+    const isExpiringSoon = daysLeft <= 7;
+
+    const animatedStyle = useAnimatedStyle(() => ({
+        transform: [{ scale: scale.value }],
+    }));
+
+    const handlePressIn = () => {
+        scale.value = withSpring(0.97, { damping: 15, stiffness: 300 });
+    };
+
+    const handlePressOut = () => {
+        scale.value = withSpring(1, { damping: 15, stiffness: 300 });
+    };
+
+    const handleAddToCart = () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        onAddToCart();
+    };
+
+    const handleToggleFavorite = () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onToggleFavorite();
+    };
+
+    // Format expiration text
+    const getExpirationText = () => {
+        if (daysLeft <= 0) return 'Vence hoje!';
+        if (daysLeft === 1) return 'Vence amanhã';
+        if (daysLeft <= 7) return `${daysLeft} dias`;
+        return new Date(product.expirationDate).toLocaleDateString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+        });
+    };
+
+    const savings = product.originalPrice - product.promoPrice;
+
     return (
-        <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.9}>
-            {/* Image */}
-            <View style={styles.imageContainer}>
+        <AnimatedTouchable
+            style={[styles.card, { width: cardWidth }, animatedStyle]}
+            onPress={onPress}
+            onPressIn={handlePressIn}
+            onPressOut={handlePressOut}
+            activeOpacity={1}
+        >
+            {/* Image Section */}
+            <View style={styles.imageSection}>
                 <Image
-                    source={{ uri: product.photo1 }}
+                    source={{ uri: product.photo1 || 'https://via.placeholder.com/200' }}
                     style={styles.image}
                     resizeMode="cover"
                 />
 
-                {/* Discount Badge */}
-                <View style={styles.discountBadge}>
+                {/* Gradient Overlay for text readability */}
+                <View style={styles.imageOverlay} />
+
+                {/* Discount Badge - Prominent */}
+                <View style={[
+                    styles.discountBadge,
+                    isUrgent && styles.discountBadgeUrgent
+                ]}>
                     <Text style={styles.discountText}>-{product.discountPercent}%</Text>
                 </View>
 
                 {/* Favorite Button */}
                 <TouchableOpacity
-                    style={styles.favoriteButton}
-                    onPress={(e) => { e.stopPropagation(); onToggleFavorite(); }}
+                    style={[
+                        styles.favoriteButton,
+                        isFavorite && styles.favoriteButtonActive
+                    ]}
+                    onPress={handleToggleFavorite}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
                     <Ionicons
                         name={isFavorite ? 'heart' : 'heart-outline'}
                         size={18}
-                        color={isFavorite ? Colors.secondary : Colors.text}
+                        color={isFavorite ? Colors.favorite : '#FFFFFF'}
                     />
                 </TouchableOpacity>
-            </View>
 
-            {/* Content */}
-            <View style={styles.content}>
-                <Text style={styles.name} numberOfLines={2}>{product.name}</Text>
-
-                <Text style={styles.store} numberOfLines={1}>
-                    <Ionicons name="storefront-outline" size={10} color={Colors.textMuted} />
-                    {' '}{product.storeName}
-                </Text>
-
-                <View style={styles.priceRow}>
-                    <View>
-                        <Text style={styles.originalPrice}>R$ {product.originalPrice.toFixed(2)}</Text>
-                        <Text style={styles.promoPrice}>R$ {product.promoPrice.toFixed(2)}</Text>
-                    </View>
-
-                    <TouchableOpacity
-                        style={styles.addButton}
-                        onPress={(e) => { e.stopPropagation(); onAddToCart(); }}
-                    >
-                        <Ionicons name="add" size={20} color={Colors.text} />
-                    </TouchableOpacity>
-                </View>
-
-                {/* Expiration */}
-                <View style={styles.expirationContainer}>
-                    <Ionicons name="time-outline" size={10} color={Colors.warning} />
-                    <Text style={styles.expirationText}>
-                        Vence: {new Date(product.expirationDate).toLocaleDateString('pt-BR')}
+                {/* Expiration Tag - Bottom of image */}
+                <View style={[
+                    styles.expirationTag,
+                    isUrgent && styles.expirationTagUrgent,
+                    isExpiringSoon && !isUrgent && styles.expirationTagWarning,
+                ]}>
+                    <Ionicons
+                        name="time-outline"
+                        size={12}
+                        color={isUrgent ? '#FFFFFF' : isExpiringSoon ? Colors.warning : '#FFFFFF'}
+                    />
+                    <Text style={[
+                        styles.expirationText,
+                        isUrgent && styles.expirationTextUrgent,
+                    ]}>
+                        {getExpirationText()}
                     </Text>
                 </View>
             </View>
-        </TouchableOpacity>
+
+            {/* Content Section */}
+            <View style={styles.content}>
+                {/* Store Info */}
+                <View style={styles.storeRow}>
+                    <View style={styles.storeLogo}>
+                        {product.storePhoto ? (
+                            <Image source={{ uri: product.storePhoto }} style={styles.storeLogoImage} />
+                        ) : (
+                            <Ionicons name="storefront" size={12} color={Colors.textMuted} />
+                        )}
+                    </View>
+                    <Text style={styles.storeName} numberOfLines={1}>
+                        {product.storeName}
+                    </Text>
+                </View>
+
+                {/* Product Name */}
+                <Text style={styles.productName} numberOfLines={2}>
+                    {product.name}
+                </Text>
+
+                {/* Price Section */}
+                <View style={styles.priceSection}>
+                    <View style={styles.priceColumn}>
+                        {product.originalPrice > product.promoPrice && (
+                            <Text style={styles.originalPrice}>
+                                R$ {product.originalPrice.toFixed(2).replace('.', ',')}
+                            </Text>
+                        )}
+                        <Text style={styles.promoPrice}>
+                            R$ {product.promoPrice.toFixed(2).replace('.', ',')}
+                        </Text>
+                    </View>
+                    {savings > 0 && (
+                        <View style={styles.savingsBadge}>
+                            <Text style={styles.savingsText}>
+                                Economize R$ {savings.toFixed(2).replace('.', ',')}
+                            </Text>
+                        </View>
+                    )}
+                </View>
+
+                {/* Add to Cart Button */}
+                <TouchableOpacity
+                    style={styles.addButton}
+                    onPress={handleAddToCart}
+                    activeOpacity={0.8}
+                >
+                    <Ionicons name="add" size={20} color="#FFFFFF" />
+                    <Text style={styles.addButtonText}>Adicionar</Text>
+                </TouchableOpacity>
+            </View>
+        </AnimatedTouchable>
     );
 };
 
 const styles = StyleSheet.create({
     card: {
-        width: CARD_WIDTH,
         backgroundColor: Colors.backgroundCard,
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: Colors.glassBorder,
+        borderRadius: DesignTokens.borderRadius.xl,
         overflow: 'hidden',
-        marginBottom: 12,
+        marginBottom: DesignTokens.spacing.md,
+        ...DesignTokens.shadows.md,
     },
-    imageContainer: {
+
+    // ========== IMAGE SECTION ==========
+    imageSection: {
         width: '100%',
-        height: CARD_WIDTH * 0.85,
-        backgroundColor: Colors.glass,
+        height: 160,
         position: 'relative',
+        backgroundColor: Colors.surfaceMuted,
     },
     image: {
         width: '100%',
         height: '100%',
     },
+    imageOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.05)',
+    },
     discountBadge: {
         position: 'absolute',
-        top: 8,
-        left: 8,
+        top: 10,
+        right: 10,
+        backgroundColor: Colors.secondary,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: DesignTokens.borderRadius.md,
+        ...DesignTokens.shadows.sm,
+    },
+    discountBadgeUrgent: {
         backgroundColor: Colors.error,
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 8,
     },
     discountText: {
-        color: Colors.text,
-        fontSize: 12,
-        fontWeight: '700',
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '800',
+        letterSpacing: 0.3,
     },
     favoriteButton: {
         position: 'absolute',
-        top: 8,
-        right: 8,
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        top: 10,
+        left: 10,
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        backgroundColor: 'rgba(0,0,0,0.35)',
         alignItems: 'center',
         justifyContent: 'center',
     },
-    content: {
-        padding: 12,
+    favoriteButtonActive: {
+        backgroundColor: 'rgba(255,255,255,0.95)',
     },
-    name: {
+    expirationTag: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 4,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        paddingVertical: 6,
+    },
+    expirationTagUrgent: {
+        backgroundColor: Colors.error,
+    },
+    expirationTagWarning: {
+        backgroundColor: 'rgba(245, 158, 11, 0.9)',
+    },
+    expirationText: {
+        color: '#FFFFFF',
+        fontSize: 11,
+        fontWeight: '600',
+        letterSpacing: 0.2,
+    },
+    expirationTextUrgent: {
+        fontWeight: '700',
+    },
+
+    // ========== CONTENT SECTION ==========
+    content: {
+        padding: DesignTokens.spacing.md,
+    },
+    storeRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginBottom: 6,
+    },
+    storeLogo: {
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        backgroundColor: Colors.surfaceMuted,
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+    },
+    storeLogoImage: {
+        width: '100%',
+        height: '100%',
+    },
+    storeName: {
+        fontSize: 11,
+        fontWeight: '500',
+        color: Colors.textMuted,
+        flex: 1,
+    },
+    productName: {
         fontSize: 14,
         fontWeight: '600',
         color: Colors.text,
-        marginBottom: 4,
+        lineHeight: 18,
+        marginBottom: 8,
         minHeight: 36,
     },
-    store: {
-        fontSize: 11,
-        color: Colors.textMuted,
-        marginBottom: 8,
+
+    // ========== PRICE SECTION ==========
+    priceSection: {
+        marginBottom: 10,
     },
-    priceRow: {
+    priceColumn: {
         flexDirection: 'row',
-        alignItems: 'flex-end',
-        justifyContent: 'space-between',
-        marginBottom: 8,
+        alignItems: 'baseline',
+        gap: 6,
     },
     originalPrice: {
-        fontSize: 11,
+        fontSize: 12,
+        fontWeight: '500',
         color: Colors.textMuted,
         textDecorationLine: 'line-through',
     },
     promoPrice: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: Colors.success,
+        fontSize: 20,
+        fontWeight: '800',
+        color: Colors.primary,
+        letterSpacing: -0.5,
     },
+    savingsBadge: {
+        marginTop: 4,
+        alignSelf: 'flex-start',
+        backgroundColor: Colors.savingsBackground,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: DesignTokens.borderRadius.sm,
+    },
+    savingsText: {
+        fontSize: 10,
+        fontWeight: '600',
+        color: Colors.savings,
+    },
+
+    // ========== ADD BUTTON ==========
     addButton: {
-        width: 36,
-        height: 36,
-        borderRadius: 12,
-        backgroundColor: Colors.primary,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    expirationContainer: {
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
         gap: 4,
+        backgroundColor: Colors.primary,
+        borderRadius: DesignTokens.borderRadius.lg,
+        paddingVertical: 12,
+        ...DesignTokens.shadows.primary,
     },
-    expirationText: {
-        fontSize: 10,
-        color: Colors.warning,
+    addButtonText: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '700',
+        letterSpacing: 0.2,
     },
 });

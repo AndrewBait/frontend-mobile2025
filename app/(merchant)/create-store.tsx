@@ -1,43 +1,45 @@
-import React, { useState, useEffect } from 'react';
+import { GradientBackground } from '@/components/GradientBackground';
+import { SelectInput } from '@/components/SelectInput';
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { api } from '@/services/api';
+import { uploadStoreProfile } from '@/services/storage';
 import {
-    StyleSheet,
-    View,
-    Text,
-    ScrollView,
-    TouchableOpacity,
-    TextInput,
-    KeyboardAvoidingView,
-    Platform,
-    Alert,
-    ActivityIndicator,
-    Image,
-} from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
-import { router, useLocalSearchParams } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { GradientBackground } from '../../components/GradientBackground';
-import { SelectInput } from '../../components/SelectInput';
-import { Colors } from '../../constants/Colors';
-import {
-    validateRequired,
-    validateCNPJ,
-    validateCEP,
-    validatePhone,
-    validateTime,
-    validateMinLength,
-    validateMaxLength,
-    sanitizeText,
-    formatCNPJ,
+    calculatePickupDeadline,
+    fetchAddressByCEP,
     formatCEP,
+    formatCNPJ,
     formatPhone,
     formatTime,
-    fetchAddressByCEP,
-    calculatePickupDeadline,
+    sanitizeText,
     STORE_TYPES,
-} from '../../utils/validation';
-import { api } from '../../services/api';
-import { uploadStoreProfile } from '../../services/storage';
+    validateCEP,
+    validateCNPJ,
+    validateMaxLength,
+    validateMinLength,
+    validatePhone,
+    validateRequired,
+    validateTime,
+    validateUUID,
+} from '@/utils/validation';
+import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    Image,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 
 interface FormErrors {
     logo?: string;
@@ -53,6 +55,7 @@ interface FormErrors {
     phone?: string;
     openTime?: string;
     closeTime?: string;
+    asaasWalletId?: string;
 }
 
 export default function CreateStoreScreen() {
@@ -82,6 +85,7 @@ export default function CreateStoreScreen() {
     const [openTime, setOpenTime] = useState('');
     const [closeTime, setCloseTime] = useState('');
     const [logoUri, setLogoUri] = useState<string | null>(null);
+    const [asaasWalletId, setAsaasWalletId] = useState('');
 
     useEffect(() => {
         if (isEditMode && editStoreId) {
@@ -109,6 +113,7 @@ export default function CreateStoreScreen() {
             const storeCity = (store as any).cidade || store.city || '';
             const storeState = (store as any).estado || store.state || '';
             const storeLogo = store.logo_url || null;
+            const storeAsaasWalletId = (store as any).asaas_wallet_id || '';
 
             setName(storeName);
             setCnpj(formatCNPJ(store.cnpj || ''));
@@ -117,6 +122,7 @@ export default function CreateStoreScreen() {
             setCep(formatCEP(storeCep));
             setCity(storeCity);
             setState(storeState);
+            setAsaasWalletId(storeAsaasWalletId);
 
             // Parse address (format: "Rua, Numero - Complemento, Bairro")
             if (storeAddress) {
@@ -277,6 +283,14 @@ export default function CreateStoreScreen() {
             newErrors.closeTime = 'Fechamento deve ser após abertura';
         }
 
+        // Validar Wallet ID Asaas (opcional, mas se preenchido deve ser UUID válido)
+        // Wallet ID é obrigatório
+        if (!validateRequired(asaasWalletId)) {
+            newErrors.asaasWalletId = 'Wallet ID é obrigatório para receber pagamentos';
+        } else if (!validateUUID(asaasWalletId)) {
+            newErrors.asaasWalletId = 'Wallet ID deve ser um UUID válido (ex: 26fde169-838b-4c15-aed9-9ab39701a4c4)';
+        }
+
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
@@ -295,22 +309,9 @@ export default function CreateStoreScreen() {
             const hours = `${openTime} às ${closeTime}`;
             const pickupDeadline = calculatePickupDeadline(closeTime);
 
-            const storeData = {
-                name: sanitizeText(name),
-                cnpj: cnpj.replace(/\D/g, ''),
-                type: type,
-                address: fullAddress,
-                city: sanitizeText(city),
-                state: state.toUpperCase(),
-                zip: cep.replace(/\D/g, ''),
-                phone: phone.replace(/\D/g, ''),
-                hours: hours,
-                pickup_deadline: pickupDeadline,
-                is_active: true,
-            };
-
             if (isEditMode && editStoreId) {
-                // UPDATE MODE
+                // UPDATE MODE - Enviar apenas campos que podem ser atualizados
+                // O backend mapeia de inglês (DTO) para português (banco)
                 console.log('Calling API to update store...');
 
                 // Upload new logo if changed
@@ -325,10 +326,33 @@ export default function CreateStoreScreen() {
                     }
                 }
 
-                await api.updateStore(editStoreId, {
-                    ...storeData,
-                    ...(uploadedLogoUrl && { logo_url: uploadedLogoUrl }),
-                });
+                // Para update, enviar apenas campos que mudaram e são permitidos
+                // O UpdateStoreDto espera campos em inglês, mas o backend deve mapear para português
+                const updateData: any = {
+                    name: sanitizeText(name),
+                    cnpj: cnpj.replace(/\D/g, ''),
+                    type: type,
+                    address: fullAddress,
+                    city: sanitizeText(city),
+                    state: state.toUpperCase(),
+                    zip: cep.replace(/\D/g, ''),
+                    phone: phone.replace(/\D/g, ''),
+                    hours: hours,
+                    pickup_deadline: pickupDeadline,
+                    is_active: true,
+                };
+
+                // Adicionar asaas_wallet_id se fornecido (validado no validateForm)
+                if (asaasWalletId.trim()) {
+                    updateData.asaas_wallet_id = asaasWalletId.trim();
+                }
+
+                // Adicionar logo se foi feito upload
+                if (uploadedLogoUrl) {
+                    updateData.logo_url = uploadedLogoUrl;
+                }
+                
+                await api.updateStore(editStoreId, updateData);
                 console.log('Store updated successfully');
 
                 Alert.alert(
@@ -347,10 +371,28 @@ export default function CreateStoreScreen() {
                     console.log('Role saved');
                 }
 
-                const createPromise = api.createStore({
-                    ...storeData,
+                // CREATE MODE - CreateStoreDto espera campos em inglês
+                const createData: any = {
+                    name: sanitizeText(name),
+                    cnpj: cnpj.replace(/\D/g, ''),
+                    type: type,
+                    address: fullAddress,
+                    city: sanitizeText(city),
+                    state: state.toUpperCase(),
+                    zip: cep.replace(/\D/g, ''),
+                    phone: phone.replace(/\D/g, ''),
+                    hours: hours,
+                    pickup_deadline: pickupDeadline,
+                    is_active: true,
                     is_premium: false,
-                });
+                };
+
+                // Adicionar asaas_wallet_id se fornecido (validado no validateForm)
+                if (asaasWalletId.trim()) {
+                    createData.asaas_wallet_id = asaasWalletId.trim();
+                }
+
+                const createPromise = api.createStore(createData);
 
                 const timeoutPromise = new Promise<any>((_, reject) =>
                     setTimeout(() => reject(new Error('Backend não respondeu. Verifique se o servidor NestJS está rodando.')), 15000)
@@ -368,7 +410,7 @@ export default function CreateStoreScreen() {
                         console.log('Logo uploaded:', uploadedLogoUrl);
 
                         // Update store with logo URL
-                        await api.updateStore(createdStore.id, { logo_url: uploadedLogoUrl });
+                        await api.updateStore(createdStore.id, { logo_url: uploadedLogoUrl } as any);
                         console.log('Store updated with logo');
                     } catch (uploadError: any) {
                         console.error('Logo upload failed:', uploadError);
@@ -689,6 +731,37 @@ export default function CreateStoreScreen() {
                         </View>
                     )}
 
+                    {/* Payment Configuration */}
+                    <Text style={styles.sectionTitle}>Configuração de Pagamento</Text>
+
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.label}>
+                            Wallet ID Asaas <Text style={styles.required}>*</Text>
+                        </Text>
+                        <TextInput
+                            style={[styles.input, errors.asaasWalletId && styles.inputError]}
+                            value={asaasWalletId}
+                            onChangeText={setAsaasWalletId}
+                            placeholder="26fde169-838b-4c15-aed9-9ab39701a4c4"
+                            placeholderTextColor={Colors.textMuted}
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                        />
+                        {errors.asaasWalletId && <Text style={styles.errorText}>{errors.asaasWalletId}</Text>}
+                        <View style={styles.infoBox}>
+                            <Ionicons name="information-circle-outline" size={18} color={Colors.primary} />
+                            <Text style={styles.infoText}>
+                                <Text style={styles.infoBold}>Como obter:</Text>{'\n'}
+                                1. Crie uma conta no Asaas (https://www.asaas.com){'\n'}
+                                2. Acesse "Carteiras" no painel do Asaas{'\n'}
+                                3. Crie uma nova carteira para sua loja{'\n'}
+                                4. Copie o Wallet ID (formato UUID){'\n'}
+                                5. Cole aqui no cadastro da loja{'\n\n'}
+                                <Text style={styles.infoBold}>Importante:</Text> O Wallet ID da loja deve ser diferente do Wallet ID da plataforma. Em produção, não é permitido usar o mesmo wallet para loja e plataforma.
+                            </Text>
+                        </View>
+                    </View>
+
                     {/* Submit */}
                     <TouchableOpacity
                         onPress={handleSubmit}
@@ -739,7 +812,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 20,
+        paddingHorizontal: DesignTokens.padding.medium, // Responsivo
         marginBottom: 20,
     },
     backButton: {
@@ -759,7 +832,7 @@ const styles = StyleSheet.create({
     },
     form: {
         flex: 1,
-        paddingHorizontal: 24,
+        paddingHorizontal: DesignTokens.padding.medium, // Responsivo
     },
     sectionTitle: {
         fontSize: 16,
@@ -821,7 +894,7 @@ const styles = StyleSheet.create({
     infoBox: {
         flexDirection: 'row',
         alignItems: 'flex-start',
-        backgroundColor: Colors.warning + '15',
+        backgroundColor: Colors.warning15,
         borderRadius: 12,
         padding: 12,
         marginBottom: 24,

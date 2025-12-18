@@ -336,7 +336,7 @@ O backend usa campos em **português**, enquanto o frontend usa **inglês**. O `
 
 ### Frontend (`constants/config.ts`)
 ```typescript
-API_BASE_URL: 'http://192.168.10.7:3000'
+API_BASE_URL: 'http://192.168.10.8:3000'
 SUPABASE_URL: 'https://rkmvrfqhcleibdtlcwwh.supabase.co'
 SUPABASE_ANON_KEY: '...'
 GOOGLE_CLIENT_ID: '...'

@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
-import { router } from 'expo-router';
+import { GradientBackground } from '@/components/GradientBackground';
+import { Colors } from '@/constants/Colors';
+import { supabase } from '@/services/supabase';
 import { Ionicons } from '@expo/vector-icons';
-import { GradientBackground } from '../components/GradientBackground';
-import { Colors } from '../constants/Colors';
-import { api } from '../services/api';
-import { supabase } from '../services/supabase';
+import { router } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function SelectRoleScreen() {
     const [loading, setLoading] = useState<'customer' | 'merchant' | null>(null);
@@ -64,7 +63,7 @@ export default function SelectRoleScreen() {
                         disabled={loading !== null}
                         activeOpacity={0.85}
                     >
-                        <View style={[styles.cardIcon, { backgroundColor: Colors.primary + '20' }]}>
+                        <View style={[styles.cardIcon, { backgroundColor: 'rgba(5, 150, 105, 0.1)' }]}>
                             {loading === 'customer' ? (
                                 <ActivityIndicator color={Colors.primary} />
                             ) : (
@@ -85,7 +84,7 @@ export default function SelectRoleScreen() {
                         disabled={loading !== null}
                         activeOpacity={0.85}
                     >
-                        <View style={[styles.cardIcon, { backgroundColor: Colors.secondary + '20' }]}>
+                        <View style={[styles.cardIcon, { backgroundColor: 'rgba(245, 158, 11, 0.1)' }]}>
                             {loading === 'merchant' ? (
                                 <ActivityIndicator color={Colors.secondary} />
                             ) : (
@@ -135,10 +134,10 @@ const styles = StyleSheet.create({
     card: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: Colors.backgroundCard,
+        backgroundColor: '#FFFFFF', // Fundo branco
         borderRadius: 16,
         borderWidth: 1,
-        borderColor: Colors.glassBorder,
+        borderColor: Colors.border, // #E5E7EB
         padding: 20,
         gap: 16,
     },

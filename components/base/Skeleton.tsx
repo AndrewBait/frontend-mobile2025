@@ -1,3 +1,5 @@
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
 import React, { useEffect } from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
 import Animated, {
@@ -7,11 +9,11 @@ import Animated, {
     withRepeat,
     withTiming,
 } from 'react-native-reanimated';
-import { Colors } from '../../constants/Colors';
-import { DesignTokens } from '../../constants/designTokens';
+
+type PercentString = `${number}%`;
 
 interface SkeletonProps {
-    width?: number | string;
+    width?: number | PercentString;
     height?: number;
     borderRadius?: number;
     style?: ViewStyle;
@@ -68,8 +70,8 @@ export const Skeleton: React.FC<SkeletonProps> = ({
 // Skeleton para texto
 interface SkeletonTextProps {
     lines?: number;
-    width?: number | string;
-    lastLineWidth?: number | string;
+    width?: number | PercentString;
+    lastLineWidth?: number | PercentString;
     style?: ViewStyle;
 }
 
@@ -110,7 +112,7 @@ export const SkeletonProductCard: React.FC<{ style?: ViewStyle }> = ({ style }) 
 
 const styles = StyleSheet.create({
     container: {
-        backgroundColor: Colors.glass,
+        backgroundColor: '#E5E7EB', // Gray-200
         overflow: 'hidden',
         position: 'relative',
     },
@@ -120,7 +122,7 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: Colors.glassBorder,
+        backgroundColor: '#F3F4F6', // Gray-100 (highlight)
         width: '50%',
     },
     textContainer: {

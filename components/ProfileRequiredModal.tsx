@@ -1,9 +1,8 @@
-import React from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Modal } from 'react-native';
-import { router } from 'expo-router';
+import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Colors } from '../constants/Colors';
+import { router } from 'expo-router';
+import React from 'react';
+import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 interface ProfileRequiredModalProps {
     visible: boolean;
@@ -55,13 +54,10 @@ export const ProfileRequiredModal: React.FC<ProfileRequiredModalProps> = ({
                         activeOpacity={0.8}
                         style={styles.primaryButton}
                     >
-                        <LinearGradient
-                            colors={[Colors.primary, Colors.primaryDark]}
-                            style={styles.buttonGradient}
-                        >
-                            <Ionicons name="create-outline" size={20} color={Colors.text} />
+                        <View style={styles.buttonContent}>
+                            <Ionicons name="create-outline" size={20} color="#FFFFFF" />
                             <Text style={styles.buttonText}>Completar Cadastro</Text>
-                        </LinearGradient>
+                        </View>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -97,7 +93,7 @@ const styles = StyleSheet.create({
         width: 100,
         height: 100,
         borderRadius: 50,
-        backgroundColor: Colors.warning + '15',
+        backgroundColor: Colors.warning15,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 20,
@@ -119,7 +115,7 @@ const styles = StyleSheet.create({
     infoBox: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: Colors.success + '15',
+        backgroundColor: Colors.success15,
         borderRadius: 12,
         padding: 14,
         marginBottom: 24,
@@ -134,10 +130,10 @@ const styles = StyleSheet.create({
     primaryButton: {
         width: '100%',
         borderRadius: 14,
-        overflow: 'hidden',
+        backgroundColor: Colors.primary, // Verde sólido
         marginBottom: 12,
     },
-    buttonGradient: {
+    buttonContent: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
@@ -147,7 +143,7 @@ const styles = StyleSheet.create({
     buttonText: {
         fontSize: 16,
         fontWeight: '600',
-        color: Colors.text,
+        color: '#FFFFFF', // Texto branco
     },
     secondaryButton: {
         paddingVertical: 12,

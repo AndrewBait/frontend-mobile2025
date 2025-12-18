@@ -1,9 +1,9 @@
+import { Colors } from '@/constants/Colors';
+import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs, router, usePathname } from 'expo-router';
 import React, { useEffect, useRef } from 'react';
 import { ActivityIndicator, View } from 'react-native';
-import { Colors } from '../../constants/Colors';
-import { useAuth } from '../../contexts/AuthContext';
 
 // Module-level flag to persist across remounts (last resort)
 let globalRedirectInProgress = false;
@@ -12,7 +12,7 @@ export default function MerchantLayout() {
     const { session, loading, isLoggingOut } = useAuth();
     const pathname = usePathname();
     const hasRedirectedRef = useRef(false);
-    const redirectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const redirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const isMountedRef = useRef(true);
 
     // Redirect to login if no session (after logging out)
@@ -100,7 +100,7 @@ export default function MerchantLayout() {
     if (loading) {
         return (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background }}>
-                <ActivityIndicator size="large" color={Colors.secondary} />
+                <ActivityIndicator size="large" color={Colors.primary} />
             </View>
         );
     }
@@ -109,7 +109,7 @@ export default function MerchantLayout() {
     if (isLoggingOut) {
         return (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background }}>
-                <ActivityIndicator size="large" color={Colors.secondary} />
+                <ActivityIndicator size="large" color={Colors.primary} />
             </View>
         );
     }
@@ -139,7 +139,7 @@ export default function MerchantLayout() {
         console.log('⏳ [MerchantLayout] No session but not on login page = showing loading');
         return (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background }}>
-                <ActivityIndicator size="large" color={Colors.secondary} />
+                <ActivityIndicator size="large" color={Colors.primary} />
             </View>
         );
     }
@@ -158,7 +158,7 @@ export default function MerchantLayout() {
                     paddingBottom: 25,
                     paddingTop: 10,
                 },
-                tabBarActiveTintColor: Colors.secondary,
+                tabBarActiveTintColor: Colors.primary, // Verde para consistência
                 tabBarInactiveTintColor: Colors.textMuted,
                 tabBarLabelStyle: {
                     fontSize: 11,
@@ -191,6 +191,12 @@ export default function MerchantLayout() {
                     tabBarIcon: ({ color, size }) => (
                         <Ionicons name="receipt" size={size} color={color} />
                     ),
+                }}
+            />
+            <Tabs.Screen
+                name="sale-order/[id]"
+                options={{
+                    href: null,
                 }}
             />
             <Tabs.Screen

@@ -1,24 +1,32 @@
-import React, { useState, useEffect } from 'react';
-import {
-    StyleSheet,
-    View,
-    Text,
-    ScrollView,
-    TouchableOpacity,
-    ActivityIndicator,
-    Clipboard,
-    Alert,
-} from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { GradientBackground } from '@/components/GradientBackground';
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { api, Order } from '@/services/api';
+import { copyToClipboard } from '@/utils/clipboard';
 import { Ionicons } from '@expo/vector-icons';
-import { GradientBackground } from '../../components/GradientBackground';
-import { Colors } from '../../constants/Colors';
-import { api, Order } from '../../services/api';
+import { Image } from 'expo-image';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function OrderDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
+    const insets = useSafeAreaInsets();
+    const screenPaddingTop = insets.top + DesignTokens.spacing.md;
     const [order, setOrder] = useState<Order | null>(null);
     const [loading, setLoading] = useState(true);
+    const [pixLoading, setPixLoading] = useState(false);
+    const [pixCode, setPixCode] = useState<string | null>(null);
+    const [pixQrCodeImage, setPixQrCodeImage] = useState<string | null>(null);
 
     useEffect(() => {
         if (id) {
@@ -26,10 +34,32 @@ export default function OrderDetailScreen() {
         }
     }, [id]);
 
+    useEffect(() => {
+        if (!id || !order || order.status !== 'pending_payment') return;
+
+        let isMounted = true;
+        const interval = setInterval(async () => {
+            try {
+                const data = await api.getMyOrder(id);
+                if (!isMounted) return;
+                setOrder(data);
+            } catch {
+                // rede pode oscilar; mantém tentando
+            }
+        }, 3000);
+
+        return () => {
+            isMounted = false;
+            clearInterval(interval);
+        };
+    }, [id, order?.status]);
+
     const loadOrder = async () => {
         try {
             const data = await api.getMyOrder(id!);
             setOrder(data);
+            setPixCode(data.payment?.pix_copy_paste_code || null);
+            setPixQrCodeImage(data.payment?.pix_qr_code_image || null);
         } catch (error) {
             console.error('Error loading order:', error);
             Alert.alert('Erro', 'Não foi possível carregar o pedido.');
@@ -39,26 +69,57 @@ export default function OrderDetailScreen() {
         }
     };
 
-    const handleCopyPickupCode = () => {
-        if (order?.pickup_code) {
-            Clipboard.setString(order.pickup_code);
-            Alert.alert('✅ Copiado!', 'O código de retirada foi copiado.');
+    const loadPix = async () => {
+        if (!id) return;
+        setPixLoading(true);
+        try {
+            const payment = await api.checkout(id);
+            setPixCode(payment.pix?.copy_paste_code || null);
+            setPixQrCodeImage(payment.pix?.qr_code_image || null);
+        } catch (error: any) {
+            console.error('Error loading PIX:', error);
+            Alert.alert('Erro', error?.message || 'Não foi possível carregar o PIX.');
+        } finally {
+            setPixLoading(false);
         }
     };
 
-    const handleCopyPixCode = () => {
-        if (order?.pix_code) {
-            Clipboard.setString(order.pix_code);
-            Alert.alert('✅ Copiado!', 'O código PIX foi copiado.');
+    useEffect(() => {
+        if (!order || order.status !== 'pending_payment') return;
+        // Se o /me/orders não retornar pix_* (migration ainda não aplicada), buscamos via checkout idempotente.
+        if (!pixCode && !pixQrCodeImage && !pixLoading) {
+            loadPix();
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [order?.status]);
+
+    const handleCopyPickupCode = async () => {
+        if (!order?.pickup_code) return;
+        const ok = await copyToClipboard(order.pickup_code);
+        Alert.alert(
+            ok ? '✅ Copiado!' : 'Dica',
+            ok ? 'O código de retirada foi copiado.' : 'Toque e segure no código para copiar.',
+        );
+    };
+
+    const handleCopyPixCode = async () => {
+        const pix = pixCode || order?.payment?.pix_copy_paste_code;
+        if (!pix) return;
+        const ok = await copyToClipboard(pix);
+        Alert.alert(
+            ok ? '✅ Copiado!' : 'Dica',
+            ok ? 'O código PIX foi copiado.' : 'Toque e segure no código para copiar.',
+        );
     };
 
     const getStatusInfo = (status: string) => {
         switch (status) {
+            case 'pending_payment':
             case 'pending':
                 return {
                     label: 'Aguardando Pagamento',
                     color: Colors.warning,
+                    bgColor: Colors.warning15,
                     icon: 'time' as const,
                     description: 'Pague o PIX para confirmar seu pedido',
                 };
@@ -66,6 +127,7 @@ export default function OrderDetailScreen() {
                 return {
                     label: 'Pago - Retirar',
                     color: Colors.success,
+                    bgColor: Colors.success15,
                     icon: 'checkmark-circle' as const,
                     description: 'Vá até a loja e apresente o código de retirada',
                 };
@@ -73,6 +135,7 @@ export default function OrderDetailScreen() {
                 return {
                     label: 'Retirado',
                     color: Colors.primary,
+                    bgColor: Colors.primary15,
                     icon: 'bag-check' as const,
                     description: 'Pedido retirado com sucesso',
                 };
@@ -80,20 +143,15 @@ export default function OrderDetailScreen() {
                 return {
                     label: 'Cancelado',
                     color: Colors.error,
+                    bgColor: Colors.error15,
                     icon: 'close-circle' as const,
                     description: 'Este pedido foi cancelado',
-                };
-            case 'expired':
-                return {
-                    label: 'Expirado',
-                    color: Colors.textMuted,
-                    icon: 'alert-circle' as const,
-                    description: 'O prazo de retirada expirou',
                 };
             default:
                 return {
                     label: 'Desconhecido',
                     color: Colors.textMuted,
+                    bgColor: Colors.surfaceMuted,
                     icon: 'help-circle' as const,
                     description: '',
                 };
@@ -111,10 +169,26 @@ export default function OrderDetailScreen() {
     }
 
     const statusInfo = getStatusInfo(order.status);
+    const pickupDeadlineInfo = (() => {
+        const deadline = order.pickup_deadline;
+        if (!deadline) return null;
+        const deadlineDate = new Date(deadline);
+        if (Number.isNaN(deadlineDate.getTime())) return null;
+        const ms = deadlineDate.getTime() - Date.now();
+        const minutes = Math.max(0, Math.floor(ms / 60000));
+        const hours = Math.floor(minutes / 60);
+        const mins = minutes % 60;
+        const label = ms <= 0
+            ? 'Prazo expirado'
+            : hours > 0
+                ? `Restam ${hours}h ${mins}min`
+                : `Restam ${mins}min`;
+        return { deadline, label, expired: ms <= 0 };
+    })();
 
     return (
         <GradientBackground>
-            <View style={styles.container}>
+            <View style={[styles.container, { paddingTop: screenPaddingTop }]}>
                 {/* Header */}
                 <View style={styles.header}>
                     <TouchableOpacity
@@ -129,12 +203,27 @@ export default function OrderDetailScreen() {
 
                 <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
                     {/* Status Card */}
-                    <View style={[styles.statusCard, { backgroundColor: statusInfo.color + '20' }]}>
+                    <View style={[styles.statusCard, { backgroundColor: statusInfo.bgColor }]}>
                         <Ionicons name={statusInfo.icon} size={48} color={statusInfo.color} />
                         <Text style={[styles.statusLabel, { color: statusInfo.color }]}>
                             {statusInfo.label}
                         </Text>
                         <Text style={styles.statusDescription}>{statusInfo.description}</Text>
+
+                        {order.status === 'paid' && pickupDeadlineInfo ? (
+                            <View style={[styles.deadlineRow, pickupDeadlineInfo.expired && styles.deadlineRowExpired]}>
+                                <Ionicons
+                                    name={pickupDeadlineInfo.expired ? 'alert-circle' : 'time'}
+                                    size={18}
+                                    color={pickupDeadlineInfo.expired ? Colors.error : Colors.warning}
+                                />
+                                <Text style={styles.deadlineText}>
+                                    {pickupDeadlineInfo.expired
+                                        ? 'Prazo de retirada expirado'
+                                        : `Retirada até ${new Date(pickupDeadlineInfo.deadline).toLocaleString('pt-BR')} • ${pickupDeadlineInfo.label}`}
+                                </Text>
+                            </View>
+                        ) : null}
                     </View>
 
                     {/* Pickup Code */}
@@ -144,25 +233,52 @@ export default function OrderDetailScreen() {
                             onPress={handleCopyPickupCode}
                         >
                             <Text style={styles.pickupCodeLabel}>Código de Retirada</Text>
-                            <Text style={styles.pickupCode}>{order.pickup_code}</Text>
-                            <Text style={styles.pickupCodeHint}>Toque para copiar</Text>
+                            <Text style={styles.pickupCode} selectable>{order.pickup_code}</Text>
+                            <Text style={styles.pickupCodeHint}>Toque para copiar (ou segure para selecionar)</Text>
                         </TouchableOpacity>
                     )}
 
                     {/* PIX Code (if pending) */}
-                    {order.status === 'pending' && order.pix_code && (
+                    {order.status === 'pending_payment' && (
                         <View style={styles.pixCard}>
                             <Text style={styles.pixTitle}>Pague o PIX</Text>
-                            <View style={styles.pixCodeBox}>
-                                <Text style={styles.pixCode} numberOfLines={3}>{order.pix_code}</Text>
-                            </View>
-                            <TouchableOpacity
-                                style={styles.copyButton}
-                                onPress={handleCopyPixCode}
-                            >
-                                <Ionicons name="copy" size={18} color={Colors.primary} />
-                                <Text style={styles.copyButtonText}>Copiar Código</Text>
-                            </TouchableOpacity>
+                            {pixLoading && !pixQrCodeImage && !pixCode ? (
+                                <View style={styles.pixLoadingRow}>
+                                    <ActivityIndicator size="small" color={Colors.primary} />
+                                    <Text style={styles.pixLoadingText}>Carregando PIX...</Text>
+                                </View>
+                            ) : null}
+                            {pixQrCodeImage ? (
+                                <View style={styles.qrCodeBox}>
+                                    <Image
+                                        source={{ uri: pixQrCodeImage }}
+                                        style={styles.qrCodeImage}
+                                        contentFit="contain"
+                                        transition={200}
+                                    />
+                                </View>
+                            ) : null}
+                            {pixCode ? (
+                                <>
+                                    <View style={styles.pixCodeBox}>
+                                        <Text style={styles.pixCode} selectable>
+                                            {pixCode}
+                                        </Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        style={styles.copyButton}
+                                        onPress={handleCopyPixCode}
+                                    >
+                                        <Ionicons name="copy" size={18} color={Colors.primary} />
+                                        <Text style={styles.copyButtonText}>Copiar Código</Text>
+                                    </TouchableOpacity>
+                                </>
+                            ) : (
+                                <TouchableOpacity style={styles.reloadPixButton} onPress={loadPix}>
+                                    <Ionicons name="refresh" size={18} color={Colors.primary} />
+                                    <Text style={styles.reloadPixText}>Gerar/Atualizar PIX</Text>
+                                </TouchableOpacity>
+                            )}
                         </View>
                     )}
 
@@ -176,7 +292,9 @@ export default function OrderDetailScreen() {
                         <View style={styles.infoRow}>
                             <Ionicons name="location" size={18} color={Colors.textMuted} />
                             <Text style={styles.infoText}>
-                                {order.store?.address}, {order.store?.city} - {order.store?.state}
+                                {order.store?.address
+                                    ? `${order.store.address}${order.store.city ? `, ${order.store.city}` : ''}${order.store.state ? ` - ${order.store.state}` : ''}`
+                                    : 'Endereço não informado'}
                             </Text>
                         </View>
                         <View style={styles.infoRow}>
@@ -188,21 +306,25 @@ export default function OrderDetailScreen() {
                     {/* Items */}
                     <Text style={styles.sectionTitle}>Itens do Pedido</Text>
                     <View style={styles.itemsCard}>
-                        {order.items?.map((item) => (
-                            <View key={item.id} style={styles.itemRow}>
-                                <View style={styles.itemInfo}>
-                                    <Text style={styles.itemName}>{item.batch?.product?.name || 'Produto'}</Text>
-                                    <Text style={styles.itemQty}>{item.quantity}x R$ {item.unit_price.toFixed(2)}</Text>
+                        {order.items?.map((item) => {
+                            const unitPrice = item.unit_price ?? item.price ?? 0;
+
+                            return (
+                                <View key={item.id} style={styles.itemRow}>
+                                    <View style={styles.itemInfo}>
+                                        <Text style={styles.itemName}>{item.batch?.product?.name || 'Produto'}</Text>
+                                        <Text style={styles.itemQty}>{item.quantity}x R$ {unitPrice.toFixed(2)}</Text>
+                                    </View>
+                                    <Text style={styles.itemTotal}>
+                                        R$ {(item.quantity * unitPrice).toFixed(2)}
+                                    </Text>
                                 </View>
-                                <Text style={styles.itemTotal}>
-                                    R$ {(item.quantity * item.unit_price).toFixed(2)}
-                                </Text>
-                            </View>
-                        ))}
+                            );
+                        })}
 
                         <View style={styles.totalRow}>
                             <Text style={styles.totalLabel}>Total</Text>
-                            <Text style={styles.totalValue}>R$ {order.total_amount.toFixed(2)}</Text>
+                            <Text style={styles.totalValue}>R$ {order.total.toFixed(2)}</Text>
                         </View>
                     </View>
 
@@ -254,7 +376,6 @@ export default function OrderDetailScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        paddingTop: 50,
     },
     loadingContainer: {
         flex: 1,
@@ -279,8 +400,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     headerTitle: {
-        fontSize: 18,
-        fontWeight: '600',
+        ...DesignTokens.typography.bodyBold,
         color: Colors.text,
     },
     content: {
@@ -294,35 +414,57 @@ const styles = StyleSheet.create({
         marginBottom: 24,
     },
     statusLabel: {
-        fontSize: 20,
-        fontWeight: '700',
+        ...DesignTokens.typography.h2,
         marginTop: 16,
         marginBottom: 8,
     },
     statusDescription: {
-        fontSize: 14,
+        ...DesignTokens.typography.small,
         color: Colors.textSecondary,
         textAlign: 'center',
     },
+    deadlineRow: {
+        marginTop: 16,
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 10,
+        backgroundColor: Colors.glass,
+        borderWidth: 1,
+        borderColor: Colors.glassBorder,
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+    },
+    deadlineRowExpired: {
+        backgroundColor: Colors.error15,
+        borderColor: Colors.error25,
+    },
+    deadlineText: {
+        ...DesignTokens.typography.small,
+        color: Colors.text,
+        flex: 1,
+        lineHeight: 18,
+    },
     pickupCodeCard: {
-        backgroundColor: Colors.success + '20',
+        backgroundColor: '#ECFDF5', // Emerald-50
         borderRadius: 16,
         padding: 24,
         alignItems: 'center',
         marginBottom: 24,
         borderWidth: 2,
-        borderColor: Colors.success,
+        borderColor: Colors.primary, // Verde
         borderStyle: 'dashed',
     },
     pickupCodeLabel: {
         fontSize: 14,
-        color: Colors.success,
+        color: Colors.primary, // Verde
         marginBottom: 12,
+        fontWeight: '600',
     },
     pickupCode: {
-        fontSize: 36,
+        fontSize: 32, // Conforme plano
         fontWeight: '800',
-        color: Colors.success,
+        color: Colors.primary, // Verde
         letterSpacing: 4,
     },
     pickupCodeHint: {
@@ -350,10 +492,38 @@ const styles = StyleSheet.create({
         padding: 12,
         marginBottom: 12,
     },
+    qrCodeBox: {
+        width: '100%',
+        backgroundColor: Colors.backgroundCard,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: Colors.glassBorder,
+        padding: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 12,
+    },
+    qrCodeImage: {
+        width: 220,
+        height: 220,
+        backgroundColor: Colors.surfaceMuted,
+        borderRadius: 12,
+    },
     pixCode: {
         fontSize: 11,
         color: Colors.textSecondary,
         fontFamily: 'monospace',
+    },
+    pixLoadingRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 10,
+        paddingVertical: 12,
+    },
+    pixLoadingText: {
+        ...DesignTokens.typography.small,
+        color: Colors.textSecondary,
     },
     copyButton: {
         flexDirection: 'row',
@@ -365,6 +535,20 @@ const styles = StyleSheet.create({
     copyButtonText: {
         fontSize: 14,
         fontWeight: '600',
+        color: Colors.primary,
+    },
+    reloadPixButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingVertical: 12,
+        borderTopWidth: 1,
+        borderTopColor: Colors.glassBorder,
+        marginTop: 12,
+    },
+    reloadPixText: {
+        ...DesignTokens.typography.bodyBold,
         color: Colors.primary,
     },
     sectionTitle: {

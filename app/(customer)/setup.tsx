@@ -1,36 +1,38 @@
-import React, { useState, useEffect } from 'react';
+import { GradientBackground } from '@/components/GradientBackground';
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { useAuth } from '@/contexts/AuthContext';
+import { api } from '@/services/api';
 import {
-    StyleSheet,
-    View,
-    Text,
-    ScrollView,
-    TouchableOpacity,
-    TextInput,
-    KeyboardAvoidingView,
-    Platform,
-    Alert,
-    ActivityIndicator,
-} from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+    DEFAULT_PICKUP_RADIUS,
+    fetchAddressByCEP,
+    formatCEP,
+    formatCPF,
+    formatPhone,
+    RADIUS_OPTIONS,
+    validateCEP,
+    validateCPF,
+    validatePhone,
+    validateRequired,
+} from '@/utils/validation';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
-import { GradientBackground } from '../../components/GradientBackground';
-import { Colors } from '../../constants/Colors';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import {
-    validateRequired,
-    validatePhone,
-    validateCPF,
-    validateCEP,
-    formatPhone,
-    formatCPF,
-    formatCEP,
-    fetchAddressByCEP,
-    RADIUS_OPTIONS,
-    DEFAULT_PICKUP_RADIUS,
-} from '../../utils/validation';
-import { api } from '../../services/api';
-import { useAuth } from '../../contexts/AuthContext';
+    ActivityIndicator,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface FormErrors {
     phone?: string;
@@ -39,6 +41,8 @@ interface FormErrors {
 }
 
 export default function CustomerSetupScreen() {
+    const insets = useSafeAreaInsets();
+    const screenPaddingTop = insets.top + DesignTokens.spacing.md;
     const { pendingRole } = useLocalSearchParams<{ pendingRole?: string }>();
     const { user, refreshUser } = useAuth();
     const [loading, setLoading] = useState(false);
@@ -61,11 +65,26 @@ export default function CustomerSetupScreen() {
     const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
 
     useEffect(() => {
-        if (user) {
-            if (user.phone) setPhone(formatPhone(user.phone));
-        }
+        loadExistingData();
         requestLocation();
     }, [user]);
+
+    const loadExistingData = async () => {
+        if (!user) return;
+        
+        try {
+            // Carregar perfil completo (inclui customer com CPF)
+            const profile = await api.getProfile();
+            if (profile.phone) setPhone(formatPhone(profile.phone));
+            
+            // Carregar CPF do customer se existir
+            if (profile.customer?.cpf) {
+                setCpf(formatCPF(profile.customer.cpf));
+            }
+        } catch (error) {
+            console.error('Error loading profile:', error);
+        }
+    };
 
     const requestLocation = async () => {
         setLoadingLocation(true);
@@ -132,8 +151,11 @@ export default function CustomerSetupScreen() {
             newErrors.phone = 'Telefone inválido';
         }
 
-        if (cpf && !validateCPF(cpf)) {
-            newErrors.cpf = 'CPF inválido';
+        // CPF agora é obrigatório
+        if (!validateRequired(cpf)) {
+            newErrors.cpf = 'CPF é obrigatório';
+        } else if (!validateCPF(cpf)) {
+            newErrors.cpf = 'CPF inválido. Use o formato: 000.000.000-00';
         }
 
         if (cep && !validateCEP(cep)) {
@@ -162,9 +184,15 @@ export default function CustomerSetupScreen() {
             });
             console.log('Profile saved');
 
+            // CPF é obrigatório, sempre enviar
+            const cleanCpf = cpf.replace(/\D/g, '');
             if (coords) {
-                await api.updateLocation(coords.lat, coords.lng, radius);
-                console.log('Location saved');
+                await api.updateLocation(coords.lat, coords.lng, radius, cleanCpf);
+                console.log('Location and CPF saved');
+            } else {
+                // Se não tiver coordenadas, atualizar apenas CPF (usar coordenadas padrão)
+                await api.updateLocation(0, 0, radius, cleanCpf);
+                console.log('CPF saved');
             }
 
             await refreshUser();
@@ -185,7 +213,7 @@ export default function CustomerSetupScreen() {
     return (
         <GradientBackground>
             <KeyboardAvoidingView
-                style={styles.container}
+                style={[styles.container, { paddingTop: screenPaddingTop }]}
                 behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             >
                 {/* Header */}
@@ -287,7 +315,9 @@ export default function CustomerSetupScreen() {
                     </View>
 
                     <View style={styles.inputGroup}>
-                        <Text style={styles.label}>CPF (opcional)</Text>
+                        <Text style={styles.label}>
+                            CPF <Text style={styles.required}>*</Text>
+                        </Text>
                         <TextInput
                             style={[styles.input, errors.cpf && styles.inputError]}
                             value={cpf}
@@ -442,7 +472,6 @@ export default function CustomerSetupScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        paddingTop: 50,
     },
     header: {
         flexDirection: 'row',
@@ -462,8 +491,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     headerTitle: {
-        fontSize: 18,
-        fontWeight: '600',
+        ...DesignTokens.typography.h3,
         color: Colors.text,
     },
     form: {
@@ -479,14 +507,14 @@ const styles = StyleSheet.create({
         gap: 12,
     },
     locationGranted: {
-        backgroundColor: Colors.success + '15',
+        backgroundColor: Colors.success15,
         borderWidth: 1,
-        borderColor: Colors.success + '30',
+        borderColor: Colors.success30,
     },
     locationDenied: {
-        backgroundColor: Colors.warning + '15',
+        backgroundColor: Colors.warning15,
         borderWidth: 1,
-        borderColor: Colors.warning + '30',
+        borderColor: Colors.warning30,
     },
     locationInfo: {
         flex: 1,
@@ -598,7 +626,7 @@ const styles = StyleSheet.create({
     infoBox: {
         flexDirection: 'row',
         alignItems: 'flex-start',
-        backgroundColor: Colors.primary + '15',
+        backgroundColor: Colors.primary15,
         borderRadius: 16,
         padding: 16,
         marginTop: 24,

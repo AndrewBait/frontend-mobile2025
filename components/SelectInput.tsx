@@ -1,7 +1,8 @@
 import React from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, Modal, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/Colors';
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
 
 interface Option {
     value: string;
@@ -104,13 +105,12 @@ export const SelectInput: React.FC<SelectInputProps> = ({
 
 const styles = StyleSheet.create({
     container: {
-        marginBottom: 16,
+        marginBottom: DesignTokens.spacing.md,
     },
     label: {
-        fontSize: 14,
-        fontWeight: '600',
+        ...DesignTokens.typography.smallBold,
         color: Colors.text,
-        marginBottom: 8,
+        marginBottom: DesignTokens.spacing.sm,
     },
     required: {
         color: Colors.error,
@@ -119,67 +119,67 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        backgroundColor: Colors.glass,
-        borderRadius: 14,
+        backgroundColor: Colors.inputBackground,
+        borderRadius: DesignTokens.borderRadius.lg,
         borderWidth: 1,
         borderColor: Colors.glassBorder,
-        paddingHorizontal: 16,
-        paddingVertical: 14,
+        paddingHorizontal: DesignTokens.spacing.md,
+        minHeight: DesignTokens.touchTargets.large,
     },
     selectError: {
         borderColor: Colors.error,
     },
     selectText: {
-        fontSize: 15,
+        ...DesignTokens.typography.body,
         color: Colors.text,
     },
     placeholder: {
         color: Colors.textMuted,
     },
     errorText: {
-        fontSize: 12,
+        ...DesignTokens.typography.caption,
         color: Colors.error,
-        marginTop: 4,
+        marginTop: DesignTokens.spacing.xs,
     },
     modalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.7)',
         justifyContent: 'center',
-        padding: 24,
+        padding: DesignTokens.spacing.xl,
     },
     modalContent: {
         backgroundColor: Colors.backgroundCard,
-        borderRadius: 20,
+        borderRadius: DesignTokens.borderRadius.xl,
         maxHeight: '70%',
         borderWidth: 1,
         borderColor: Colors.glassBorder,
+        ...DesignTokens.shadows.lg,
     },
     modalHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: 16,
+        padding: DesignTokens.spacing.md,
         borderBottomWidth: 1,
         borderBottomColor: Colors.glassBorder,
     },
     modalTitle: {
-        fontSize: 18,
-        fontWeight: '600',
+        ...DesignTokens.typography.h3,
         color: Colors.text,
     },
     option: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 16,
+        padding: DesignTokens.spacing.md,
         borderBottomWidth: 1,
         borderBottomColor: Colors.glassBorder,
     },
     optionSelected: {
-        backgroundColor: Colors.primary + '15',
+        backgroundColor: Colors.primary15,
     },
     optionText: {
-        fontSize: 15,
+        ...DesignTokens.typography.body,
         color: Colors.text,
     },
     optionTextSelected: {

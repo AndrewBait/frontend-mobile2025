@@ -1,11 +1,18 @@
+import { Badge } from '@/components/base/Badge';
+import { Button } from '@/components/base/Button';
+import { GradientBackground } from '@/components/GradientBackground';
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { useCart } from '@/contexts/CartContext';
+import { api, Batch } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
-    Image,
     ScrollView,
     Share,
     StyleSheet,
@@ -13,15 +20,11 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { Badge } from '../../components/base/Badge';
-import { Button } from '../../components/base/Button';
-import { GradientBackground } from '../../components/GradientBackground';
-import { Colors } from '../../constants/Colors';
-import { DesignTokens } from '../../constants/designTokens';
-import { useCart } from '../../contexts/CartContext';
-import { api, Batch } from '../../services/api';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ProductDetailScreen() {
+    const insets = useSafeAreaInsets();
+    const headerTop = insets.top + DesignTokens.spacing.md;
     const { id } = useLocalSearchParams<{ id: string }>();
     const { incrementCartCount, updateCartCache } = useCart();
     const [batch, setBatch] = useState<Batch | null>(null);
@@ -225,7 +228,7 @@ export default function ProductDetailScreen() {
         <GradientBackground>
             <View style={styles.container}>
                 {/* Header */}
-                <View style={styles.header}>
+                <View style={[styles.header, { top: headerTop }]}>
                     <TouchableOpacity
                         style={styles.headerButton}
                         onPress={() => router.back()}
@@ -258,6 +261,8 @@ export default function ProductDetailScreen() {
                         <Image
                             source={{ uri: productData?.foto1 || productData?.photo1 || 'https://via.placeholder.com/300' }}
                             style={styles.productImage}
+                            contentFit="cover"
+                            transition={200}
                         />
                         {discountPercent > 0 && (
                             <Badge
@@ -276,7 +281,7 @@ export default function ProductDetailScreen() {
                             <View style={styles.storeIconContainer}>
                                 <Ionicons name="storefront" size={18} color={Colors.secondary} />
                             </View>
-                            <Text style={styles.storeName}>{batch.store?.name || (batch.store as any)?.nome || 'Loja'}</Text>
+                            <Text style={styles.storeName}>{batch.store?.nome || batch.store?.name || 'Loja'}</Text>
                             <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
                         </TouchableOpacity>
 
@@ -323,7 +328,7 @@ export default function ProductDetailScreen() {
                         {/* Expiration & Stock */}
                         <View style={styles.infoCards}>
                             {expirationDate && (
-                                <View style={[styles.infoCard, { backgroundColor: Colors.warning + '15' }]}>
+                                <View style={[styles.infoCard, { backgroundColor: Colors.warning15 }]}>
                                     <Ionicons name="calendar" size={20} color={Colors.warning} />
                                     <Text style={[styles.infoCardTitle, { color: Colors.warning }]}>
                                         {daysToExpire !== null && daysToExpire > 0 
@@ -340,7 +345,7 @@ export default function ProductDetailScreen() {
                                 </View>
                             )}
 
-                            <View style={[styles.infoCard, { backgroundColor: Colors.success + '15' }]}>
+                            <View style={[styles.infoCard, { backgroundColor: Colors.success15 }]}>
                                 <Ionicons name="cube" size={20} color={Colors.success} />
                                 <Text style={[styles.infoCardTitle, { color: Colors.success }]}>
                                     {(batch.stock ?? batch.estoque_total ?? 0)} em estoque
@@ -415,7 +420,6 @@ const styles = StyleSheet.create({
     },
     header: {
         position: 'absolute',
-        top: 50,
         left: 0,
         right: 0,
         flexDirection: 'row',
@@ -438,7 +442,7 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     imageContainer: {
-        height: 320,
+        height: 400, // Hero image maior conforme plano
         backgroundColor: Colors.glass,
         position: 'relative',
     },
@@ -450,10 +454,6 @@ const styles = StyleSheet.create({
         position: 'absolute',
         bottom: 16,
         right: 16,
-        backgroundColor: Colors.error,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 10,
     },
     discountText: {
         fontSize: 16,
@@ -461,19 +461,24 @@ const styles = StyleSheet.create({
         color: Colors.text,
     },
     infoContainer: {
-        padding: 24,
+        padding: DesignTokens.padding.medium, // Responsivo
     },
     storeRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 16,
-        gap: 8,
+        marginBottom: DesignTokens.spacing.md,
+        gap: DesignTokens.spacing.sm,
+        paddingVertical: DesignTokens.spacing.sm,
+        paddingHorizontal: DesignTokens.spacing.md,
+        backgroundColor: '#F9FAFB', // Gray-50
+        borderRadius: DesignTokens.borderRadius.md,
+        marginBottom: DesignTokens.spacing.md,
     },
     storeIconContainer: {
         width: 32,
         height: 32,
         borderRadius: 10,
-        backgroundColor: Colors.secondary + '20',
+        backgroundColor: Colors.secondary20,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -501,7 +506,11 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 24,
+        marginBottom: DesignTokens.spacing.lg,
+        paddingVertical: DesignTokens.spacing.md,
+        borderTopWidth: 1,
+        borderBottomWidth: 1,
+        borderColor: Colors.border,
     },
     originalPrice: {
         fontSize: 14,

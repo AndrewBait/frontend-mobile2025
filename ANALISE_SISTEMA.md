@@ -144,7 +144,7 @@ Sistema de marketplace mobile para produtos próximos do vencimento, composto po
 
 ## 📍 Rotas do Backend (NestJS)
 
-### Base URL: `http://192.168.10.7:3000`
+### Base URL: `http://192.168.10.8:3000`
 
 #### 👤 Usuários (`UsersController`)
 - `GET /me` - Obter usuário atual (cria se não existir)
@@ -394,7 +394,7 @@ app/
 
 ### Frontend (`constants/config.ts`)
 ```typescript
-API_BASE_URL = 'http://192.168.10.7:3000'
+API_BASE_URL = 'http://192.168.10.8:3000'
 SUPABASE_URL = 'https://rkmvrfqhcleibdtlcwwh.supabase.co'
 SUPABASE_ANON_KEY = '...'
 GOOGLE_CLIENT_ID = '...'

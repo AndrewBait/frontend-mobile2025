@@ -1,6 +1,6 @@
-import { API_BASE_URL } from '../constants/config';
-import { formatPhoneForBackend } from '../utils/validation';
-import { getAccessToken } from './supabase';
+import { API_BASE_URL } from '@/constants/config';
+import { getAccessToken, refreshAccessToken } from '@/services/supabase';
+import { formatPhoneForBackend } from '@/utils/validation';
 
 // Types based on API contract
 export interface User {
@@ -19,35 +19,64 @@ export interface User {
 
 export interface Store {
     id: string;
-    merchant_id: string;
-    name: string;
-    cnpj: string;
+    // IDs/relacionamentos
+    merchant_id?: string;
+    owner_id?: string;
+
+    // Campos Frontend (EN)
+    name?: string;
     type?: string;
-    address: string;
-    city: string;
-    state: string;
-    zip: string;
-    phone: string;
-    hours: string;
+    address?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+    phone?: string;
+    hours?: string;
     pickup_deadline?: string;
+
+    // Campos Backend (PT-BR / variantes)
+    nome?: string;
+    tipo?: string;
+    endereco?: string;
+    cidade?: string;
+    estado?: string;
+    cep?: string;
+    telefone?: string;
+    horario_funcionamento?: string;
+    horario_limite_retirada?: string;
+
+    cnpj?: string;
     lat?: number;
     lng?: number;
     logo_url?: string;
-    is_active: boolean;
-    is_premium: boolean;
+    is_active?: boolean;
+    active?: boolean;
+    is_premium?: boolean;
+    asaas_wallet_id?: string;
     created_at?: string;
 }
 
 export interface Product {
     id: string;
-    store_id: string;
-    name: string;
+    store_id?: string;
+    // Campos Frontend (EN)
+    name?: string;
     description?: string;
-    category: string;
+    category?: string;
     original_price?: number;
     photo1?: string;
     photo2?: string;
-    is_active: boolean;
+    // Campos Backend (PT-BR / variantes)
+    nome?: string;
+    descricao?: string;
+    categoria?: string;
+    preco_normal?: number;
+    foto1?: string;
+    foto2?: string;
+    image?: string;
+    foto?: string;
+    is_active?: boolean;
+    active?: boolean;
     created_at?: string;
 }
 
@@ -55,14 +84,7 @@ export interface Batch {
     id: string;
     product_id: string;
     store_id: string;
-    // English fields
-    original_price?: number;
-    promo_price?: number;
-    discount_percent?: number;
-    expiration_date?: string;
-    stock?: number;
-    is_active?: boolean;
-    // Portuguese fields from backend
+    // Campos Backend (Snake Case / PT-BR)
     preco_normal_override?: number;
     preco_promocional?: number;
     desconto_percentual?: number;
@@ -71,48 +93,94 @@ export interface Batch {
     disponivel?: number;
     active?: boolean;
     status?: string;
-    product?: Product & {
-        nome?: string;
-        foto1?: string;
-        foto2?: string;
-        preco_normal?: number;
-    };
+    
+    // Campos Frontend (Camel Case - opcionais para compatibilidade)
+    promo_price?: number;
+    original_price?: number;
+    expiration_date?: string;
+    stock?: number;
+    is_active?: boolean;
+    discount_percent?: number;
+
+    // Relacionamentos (o join do Supabase pode vir singular ou plural)
+    product?: Product;
+    products?: Product;
     store?: Store;
+    stores?: Store;
 }
 
 export interface CartItem {
-    batch_id: string;
+    id?: string;
     quantity: number;
+    price_snapshot?: number;
+    
+    // IDs de referência (podem variar conforme o endpoint)
+    batch_id?: string;
+    product_batch_id?: string;
+
+    // Objeto populado
     batch?: Batch;
+    product_batches?: Batch;
 }
 
 export interface Cart {
+    id?: string;
+    store_id?: string;
+    store?: Store;
+    stores?: Store;
     items: CartItem[];
     total: number;
 }
 
+// Multi-cart response (quando há carrinhos de múltiplas lojas)
+export interface MultiCart {
+    carts: Cart[];
+    total: number;
+}
+
+export interface Payment {
+    status?: 'pending' | 'paid' | 'cancelled' | string;
+    paid_at?: string;
+    pix_copy_paste_code?: string;
+    pix_qr_code_image?: string;
+    gross_value?: number;
+    platform_fee?: number;
+    store_value?: number;
+}
+
 export interface Order {
     id: string;
-    customer_id: string;
-    store_id: string;
-    status: 'pending' | 'paid' | 'picked_up' | 'cancelled' | 'expired';
-    total_amount: number;
+    customer_id?: string;
+    store_id?: string;
+    status: 'pending_payment' | 'paid' | 'picked_up' | 'cancelled' | string;
+    total: number;
+    total_amount?: number; // compat (algumas telas usam esse nome)
     pickup_code?: string;
-    pix_code?: string;
+    pickup_deadline?: string;
     paid_at?: string;
     picked_up_at?: string;
+    cancelled_at?: string;
     created_at?: string;
     store?: Store;
+    stores?: Store;
+    customer?: User;
+    customers?: any;
+    payment?: Payment;
+    payments?: Payment[];
     items?: OrderItem[];
+    order_items?: any[];
 }
 
 export interface OrderItem {
     id: string;
-    order_id: string;
-    batch_id: string;
+    order_id?: string;
+    batch_id?: string;
+    product_batch_id?: string;
     quantity: number;
-    unit_price: number;
+    unit_price?: number;
+    price?: number;
     batch?: Batch;
+    product_batches?: Batch;
 }
 
 // API Client
@@ -122,7 +190,8 @@ class ApiClient {
 
     private async request<T>(
         endpoint: string,
-        options: RequestInit = {}
+        options: RequestInit = {},
+        retryAuth: boolean = true
     ): Promise<T> {
         const token = await getAccessToken();
 
@@ -159,6 +228,15 @@ class ApiClient {
                 ...options,
                 headers,
             });
+
+            // 401 pode acontecer quando o token expira antes do refresh automático do Supabase.
+            // Faz 1 tentativa de refresh e repete a requisição para evitar "Invalid token" intermitente.
+            if (response.status === 401 && retryAuth && token) {
+                const refreshed = await refreshAccessToken();
+                if (refreshed && refreshed !== token) {
+                    return this.request<T>(endpoint, options, false);
+                }
+            }
             
             // Reset error count on success
             if (errorCount > 0) {
@@ -334,7 +412,7 @@ class ApiClient {
         };
     }
 
-    async getProfile(): Promise<User> {
+    async getProfile(): Promise<User & { customer?: { cpf?: string } }> {
         const response = await this.request<{ user: any; customer?: any }>('/me/profile');
 
         // Map backend fields (Portuguese) to frontend fields (English)
@@ -353,6 +431,7 @@ class ApiClient {
             radius_km: customer?.raio_padrao_km || user.radius_km || 5,
             profile_complete: user.profile_complete,
             created_at: user.created_at,
+            customer: customer ? { cpf: customer.cpf } : undefined,
         };
     }
 
@@ -374,10 +453,14 @@ class ApiClient {
         });
     }
 
-    async updateLocation(lat: number, lng: number, radius_km: number = 5): Promise<User> {
+    async updateLocation(lat: number, lng: number, radius_km: number = 5, cpf?: string): Promise<User> {
+        const body: any = { lat, lng, radius_km };
+        if (cpf) {
+            body.cpf = cpf;
+        }
         return this.request('/me/location', {
             method: 'PUT',
-            body: JSON.stringify({ lat, lng, radius_km }),
+            body: JSON.stringify(body),
         });
     }
 
@@ -430,6 +513,7 @@ class ApiClient {
             logo_url: response.logo_url,
             is_active: response.active ?? response.is_active ?? true,
             is_premium: response.is_premium ?? false,
+            asaas_wallet_id: response.asaas_wallet_id,
             created_at: response.created_at,
         };
     }
@@ -590,6 +674,131 @@ class ApiClient {
         };
     }
 
+    private mapOrderFields(order: any): Order {
+        const stores = order?.store || order?.stores;
+        const customersRel = order?.customer || order?.customers;
+        const customerUser = customersRel?.users;
+        const paymentsRaw: any[] = Array.isArray(order?.payments)
+            ? order.payments
+            : order?.payment
+                ? [order.payment]
+                : [];
+
+        const primaryPayment = paymentsRaw[0];
+        const payment: Payment | undefined = primaryPayment
+            ? {
+                ...primaryPayment,
+                status: primaryPayment.status,
+                paid_at: primaryPayment.paid_at,
+                pix_copy_paste_code:
+                    primaryPayment.pix_copy_paste_code ??
+                    primaryPayment.copy_paste_code ??
+                    primaryPayment.pix_code,
+                pix_qr_code_image:
+                    primaryPayment.pix_qr_code_image ??
+                    primaryPayment.qr_code_image ??
+                    primaryPayment.pix_qrcode,
+                gross_value:
+                    primaryPayment.gross_value !== undefined
+                        ? Number(primaryPayment.gross_value)
+                        : primaryPayment.grossValue !== undefined
+                            ? Number(primaryPayment.grossValue)
+                            : undefined,
+                platform_fee:
+                    primaryPayment.platform_fee !== undefined
+                        ? Number(primaryPayment.platform_fee)
+                        : primaryPayment.platformFee !== undefined
+                            ? Number(primaryPayment.platformFee)
+                            : undefined,
+                store_value:
+                    primaryPayment.store_value !== undefined
+                        ? Number(primaryPayment.store_value)
+                        : primaryPayment.storeValue !== undefined
+                            ? Number(primaryPayment.storeValue)
+                            : undefined,
+            }
+            : undefined;
+
+        const itemsRaw: any[] = Array.isArray(order?.items)
+            ? order.items
+            : Array.isArray(order?.order_items)
+                ? order.order_items
+                : [];
+
+        const mappedItems: OrderItem[] = itemsRaw.map((item: any) => {
+            const batchRaw = item.batch || item.product_batches;
+            const productBatches = item.product_batches || item.batch;
+            const products = productBatches?.products || productBatches?.product;
+
+            return {
+                ...item,
+                order_id: item.order_id ?? order.id,
+                product_batch_id: item.product_batch_id ?? item.batch_id,
+                batch_id: item.product_batch_id ?? item.batch_id,
+                unit_price: item.unit_price ?? item.price,
+                price: item.price ?? item.unit_price,
+                batch: batchRaw
+                    ? {
+                        ...productBatches,
+                        id: productBatches.id,
+                        promo_price: productBatches.preco_promocional ?? productBatches.promo_price,
+                        expiration_date: productBatches.data_vencimento ?? productBatches.expiration_date,
+                        store_id: productBatches.store_id,
+                        product: products
+                            ? {
+                                ...products,
+                                name: products.nome ?? products.name,
+                                photo1: products.foto1 ?? products.photo1 ?? products.foto ?? products.image,
+                            }
+                            : productBatches.product,
+                    }
+                    : item.batch,
+                product_batches: item.product_batches,
+                quantity: item.quantity,
+            };
+        });
+
+        const mappedStore = stores
+            ? {
+                ...stores,
+                id: stores.id,
+                name: stores.nome ?? stores.name,
+                address: stores.endereco ?? stores.address,
+                city: stores.cidade ?? stores.city,
+                state: stores.estado ?? stores.state,
+                zip: stores.cep ?? stores.zip,
+                phone: stores.telefone ?? stores.phone,
+                hours: stores.horario_funcionamento ?? stores.hours,
+            }
+            : order.store;
+
+        const total = Number(order.total_amount ?? order.total ?? 0);
+        const mappedCustomer: User | undefined = customerUser
+            ? {
+                id: customersRel?.user_id ?? customerUser.id,
+                email: customerUser.email,
+                name: customerUser.nome ?? customerUser.name,
+                phone: customerUser.telefone ?? customerUser.phone,
+                photo_url: customerUser.foto_url ?? customerUser.photo_url,
+                role: 'customer',
+            }
+            : undefined;
+
+        return {
+            ...order,
+            total,
+            total_amount: order.total_amount ?? total,
+            store: mappedStore,
+            stores: stores,
+            customer: mappedCustomer,
+            customers: customersRel,
+            payment,
+            payments: paymentsRaw,
+            items: mappedItems,
+            order_items: order.order_items,
+        };
+    }
+
     // ==================== FAVORITES ====================
 
     async getFavorites(): Promise<Batch[]> {
@@ -611,33 +820,12 @@ class ApiClient {
 
     // ==================== CART ====================
 
-    async getCart(): Promise<Cart> {
-        // Log reduzido para evitar spam - apenas em caso de erro ou primeira chamada
-        try {
-            const response = await this.request<any>('/me/cart');
-            // Log detalhado removido para reduzir spam - apenas logar em caso de problemas
-            
-            // Se o backend retornar null (carrinho vazio), retornar estrutura vazia
-            if (!response || response === null) {
-                console.log('[API] getCart: Backend retornou null, retornando carrinho vazio');
-                return { items: [], total: 0 };
-            }
-            
-            // Se o backend retornar um objeto sem items, pode ser que items esteja vazio
-            if (!response.items && response.id) {
-                // É um carrinho mas sem items
-                console.log('[API] getCart: Carrinho sem items');
-                return { items: [], total: 0 };
-            }
-        
-            // Map backend fields (Portuguese/plural) to frontend fields (English/singular)
-            // Backend returns: product_batches, products
-            // Frontend expects: batch, batch.product
-            const mappedItems = (response.items || []).map((item: any) => {
-            // Backend structure: item.product_batches, item.product_batches.products
-            // Frontend structure: item.batch, item.batch.product
+    // Helper para mapear items do carrinho
+    private mapCartItems(items: any[]): CartItem[] {
+        return (items || []).map((item: any) => {
             const productBatches = item.product_batches || item.batch;
             const products = productBatches?.products || productBatches?.product;
+            const stores = productBatches?.stores || productBatches?.store;
             
             return {
                 ...item,
@@ -650,7 +838,6 @@ class ApiClient {
                     original_price: productBatches.preco_normal_override || productBatches.original_price,
                     expiration_date: productBatches.data_vencimento || productBatches.expiration_date,
                     store_id: productBatches.store_id,
-                    // Mapear estoque disponível (disponivel é calculado no banco)
                     stock: productBatches.disponivel ?? productBatches.stock ?? productBatches.estoque_total ?? 0,
                     disponivel: productBatches.disponivel ?? productBatches.stock ?? productBatches.estoque_total ?? 0,
                     estoque_total: productBatches.estoque_total ?? productBatches.stock ?? 0,
@@ -659,31 +846,70 @@ class ApiClient {
                         name: products.nome || products.name,
                         photo1: products.foto1 || products.photo1 || products.foto || products.image,
                     } : productBatches.product,
-                    store: productBatches.store,
+                    store: stores ? {
+                        ...stores,
+                        id: stores.id,
+                        name: stores.nome ?? stores.name,
+                        address: stores.endereco ?? stores.address,
+                    } : productBatches.store,
                 } : item.batch,
             };
-            });
+        });
+    }
+
+    // Helper para mapear um carrinho individual
+    private mapCart(cart: any): Cart {
+        const storeData = cart.stores || cart.store;
+        return {
+            id: cart.id,
+            store_id: cart.store_id,
+            store: storeData ? {
+                id: storeData.id,
+                name: storeData.nome ?? storeData.name,
+                address: storeData.endereco ?? storeData.address,
+                logo_url: storeData.logo_url,
+                phone: storeData.telefone ?? storeData.phone,
+            } : undefined,
+            items: this.mapCartItems(cart.items),
+            total: cart.total || 0,
+        };
+    }
+
+    /**
+     * Retorna o carrinho do cliente
+     * Pode retornar Cart (único carrinho) ou MultiCart (múltiplos carrinhos de lojas diferentes)
+     */
+    async getCart(): Promise<Cart | MultiCart> {
+        try {
+            const response = await this.request<any>('/me/cart');
             
-            const result = {
-                items: mappedItems,
-                total: response.total || 0,
-            };
+            if (!response || response === null) {
+                return { items: [], total: 0 };
+            }
             
-            // Log removido para reduzir spam - apenas logar em caso de problemas
+            // Verificar se é resposta multi-carrinho (tem array 'carts')
+            if (response.carts && Array.isArray(response.carts)) {
+                return {
+                    carts: response.carts.map((cart: any) => this.mapCart(cart)),
+                    total: response.total || 0,
+                };
+            }
             
-            return result;
+            // Resposta de carrinho único
+            if (!response.items && !response.id) {
+                return { items: [], total: 0 };
+            }
+            
+            return this.mapCart(response);
         } catch (error: any) {
-            // Tratar erro 403 (Insufficient role) como esperado - usuário não é customer
             const isForbidden = error?.status === 403 || error?.statusCode === 403;
             const isNetworkError = error?.message?.includes('Network request failed') || 
                                  error?.message?.includes('Failed to fetch');
             
             if (isForbidden) {
-                // Usuário não é customer, retornar carrinho vazio sem logar como erro
                 return { items: [], total: 0 };
             }
             
-            // Only log cart errors if they're not network failures (already logged in request)
             if (!isNetworkError) {
                 console.error('[API] getCart erro:', {
                     message: error?.message,
@@ -694,11 +920,31 @@ class ApiClient {
         }
     }
 
-    async addToCart(batchId: string, quantity: number = 1, replaceCart: boolean = false): Promise<Cart> {
+    /**
+     * Helper para verificar se é MultiCart
+     */
+    isMultiCart(cart: Cart | MultiCart): cart is MultiCart {
+        return 'carts' in cart && Array.isArray(cart.carts);
+    }
+
+    /**
+     * Converte Cart ou MultiCart para array de carrinhos
+     */
+    getCartsArray(cart: Cart | MultiCart): Cart[] {
+        if (this.isMultiCart(cart)) {
+            return cart.carts;
+        }
+        // Se é Cart único com items, retorna como array
+        if (cart.items && cart.items.length > 0) {
+            return [cart];
+        }
+        return [];
+    }
+
+    async addToCart(batchId: string, quantity: number = 1, replaceCart: boolean = false): Promise<Cart | MultiCart> {
         console.log('[API] addToCart chamado:', { batchId, quantity, replaceCart });
         try {
-            // Backend espera batch_id no DTO AddItemDto
-            const result = await this.request<Cart>('/me/cart/add-item', {
+            const response = await this.request<any>('/me/cart/add-item', {
                 method: 'POST',
                 body: JSON.stringify({ 
                     batch_id: batchId, 
@@ -706,27 +952,37 @@ class ApiClient {
                     replace_cart: replaceCart 
                 }),
             });
+            
+            // Verificar se é resposta multi-carrinho
+            if (response.carts && Array.isArray(response.carts)) {
+                console.log('[API] addToCart sucesso (multi-cart):', {
+                    cartsCount: response.carts.length,
+                    total: response.total || 0
+                });
+                return {
+                    carts: response.carts.map((cart: any) => this.mapCart(cart)),
+                    total: response.total || 0,
+                };
+            }
+            
             console.log('[API] addToCart sucesso:', {
-                hasItems: !!result?.items,
-                itemsCount: result?.items?.length || 0,
-                total: result?.total || 0
+                hasItems: !!response?.items,
+                itemsCount: response?.items?.length || 0,
+                total: response?.total || 0
             });
-            return result;
+            return this.mapCart(response);
         } catch (error: any) {
-            // Erros esperados (409 Conflict) não devem ser logados como ERROR
             const isExpectedError = error?.status === 409 || error?.statusCode === 409;
             
             if (isExpectedError) {
                 console.log('[API] addToCart erro esperado:', {
                     message: error?.message,
                     status: error?.status || error?.statusCode,
-                    endpoint: '/me/cart/add-item',
                     batchId
                 });
             } else {
                 console.error('[API] addToCart erro:', {
                     message: error?.message,
-                    endpoint: '/me/cart/add-item',
                     batchId,
                     quantity,
                     replaceCart
@@ -736,33 +992,41 @@ class ApiClient {
         }
     }
 
-    async updateCartItemQuantity(batchId: string, quantity: number): Promise<Cart> {
-        return this.request(`/me/cart/items/${batchId}/quantity`, {
+    async updateCartItemQuantity(batchId: string, quantity: number): Promise<Cart | MultiCart> {
+        const response = await this.request<any>(`/me/cart/items/${batchId}/quantity`, {
             method: 'PUT',
             body: JSON.stringify({ quantity }),
         });
+        
+        if (response.carts && Array.isArray(response.carts)) {
+            return {
+                carts: response.carts.map((cart: any) => this.mapCart(cart)),
+                total: response.total || 0,
+            };
+        }
+        return this.mapCart(response);
     }
 
-    async removeFromCart(batchId: string): Promise<Cart | { cart: null }> {
-        // Backend espera product_batch_id no body
-        // Backend pode retornar { cart: null } se carrinho ficar vazio, ou Cart completo
+    async removeFromCart(batchId: string): Promise<Cart | MultiCart> {
         const response = await this.request<any>('/me/cart/remove-item', {
             method: 'POST',
             body: JSON.stringify({ product_batch_id: batchId }),
         });
         
-        // Se backend retornou { cart: null }, retornar carrinho vazio
-        if (response && typeof response === 'object' && 'cart' in response) {
-            const cart = (response as any).cart;
-            if (cart === null) {
-                return { items: [], total: 0 };
-            }
-            // Se cart não é null, retornar o cart
-            return cart;
+        // Se é multi-cart
+        if (response.carts && Array.isArray(response.carts)) {
+            return {
+                carts: response.carts.map((cart: any) => this.mapCart(cart)),
+                total: response.total || 0,
+            };
         }
         
-        // Se retornou Cart diretamente, retornar como está
-        return response;
+        // Se retornou vazio
+        if (!response || response.cart === null) {
+            return { items: [], total: 0 };
+        }
+        
+        return this.mapCart(response);
     }
 
     async clearCart(): Promise<void> {
@@ -780,37 +1044,55 @@ class ApiClient {
     // ==================== ORDERS ====================
 
     async createOrder(): Promise<Order> {
-        return this.request('/me/orders', {
+        const order = await this.request<any>('/me/orders', {
             method: 'POST',
         });
+        return this.mapOrderFields(order);
     }
 
     async getMyOrders(): Promise<Order[]> {
-        return this.request('/me/orders');
+        const orders = await this.request<any[]>('/me/orders');
+        return (orders || []).map((o: any) => this.mapOrderFields(o));
     }
 
     async getMyOrder(id: string): Promise<Order> {
-        return this.request(`/me/orders/${id}`);
+        const order = await this.request<any>(`/me/orders/${id}`);
+        return this.mapOrderFields(order);
     }
 
     async getStoreOrders(storeId: string): Promise<Order[]> {
-        return this.request(`/stores/${storeId}/orders`);
+        const orders = await this.request<any[]>(`/stores/${storeId}/orders`);
+        return (orders || []).map((o: any) => this.mapOrderFields(o));
     }
 
     async getStoreOrder(storeId: string, orderId: string): Promise<Order> {
-        return this.request(`/stores/${storeId}/orders/${orderId}`);
+        const order = await this.request<any>(`/stores/${storeId}/orders/${orderId}`);
+        return this.mapOrderFields(order);
     }
 
-    async confirmPickup(storeId: string, orderId: string): Promise<Order> {
+    async confirmPickup(storeId: string, orderId: string, pickupCode: string): Promise<Order> {
         return this.request(`/stores/${storeId}/orders/${orderId}/pickup`, {
             method: 'POST',
+            body: JSON.stringify({ pickup_code: pickupCode }),
         });
     }
 
     // ==================== PAYMENTS ====================
 
-    async checkout(orderId: string): Promise<{ pix_code: string; pix_qrcode?: string }> {
+    async checkout(orderId: string): Promise<{
+        payment_id: string;
+        order_id: string;
+        status: string;
+        pix: { qr_code_image?: string; copy_paste_code?: string };
+    }> {
         return this.request('/me/payments/checkout', {
+            method: 'POST',
+            body: JSON.stringify({ order_id: orderId }),
+        });
+    }
+
+    async mockConfirmPayment(orderId: string): Promise<{ ok: boolean }> {
+        return this.request('/me/payments/mock-confirm', {
             method: 'POST',
             body: JSON.stringify({ order_id: orderId }),
         });

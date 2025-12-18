@@ -1,20 +1,33 @@
+/**
+ * Button - VenceJá Design System
+ * 
+ * Botão moderno com sombras coloridas, animações fluidas
+ * e variantes para diferentes contextos
+ */
+
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import {
     ActivityIndicator,
+    Pressable,
     StyleSheet,
     Text,
     TextStyle,
-    TouchableOpacity,
     View,
     ViewStyle,
 } from 'react-native';
-import { Colors } from '../../constants/Colors';
-import { DesignTokens } from '../../constants/designTokens';
+import Animated, {
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring,
+    withTiming
+} from 'react-native-reanimated';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'tertiary' | 'danger';
-export type ButtonSize = 'sm' | 'md' | 'lg';
+export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'success' | 'gradient';
+export type ButtonSize = 'sm' | 'md' | 'lg' | 'xl';
 
 interface ButtonProps {
     title: string;
@@ -33,6 +46,8 @@ interface ButtonProps {
     accessibilityHint?: string;
 }
 
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
 export const Button: React.FC<ButtonProps> = ({
     title,
     onPress,
@@ -49,182 +64,182 @@ export const Button: React.FC<ButtonProps> = ({
     accessibilityLabel,
     accessibilityHint,
 }) => {
+    const isDisabled = disabled || loading;
+    const pressScale = useSharedValue(1);
+    const pressOpacity = useSharedValue(1);
+
+    // Get size config
+    const sizeConfig = DesignTokens.components.button[size] || DesignTokens.components.button.md;
+
+    // Animated styles
+    const animatedContainerStyle = useAnimatedStyle(() => ({
+        transform: [{ scale: pressScale.value }],
+        opacity: pressOpacity.value,
+    }));
+
     const handlePress = () => {
-        if (disabled || loading) return;
-        
+        if (isDisabled) return;
         if (hapticFeedback) {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         }
-        
         onPress();
     };
 
-    const isDisabled = disabled || loading;
-
-    // Size styles
-    const sizeStyles = {
-        sm: {
-            paddingVertical: DesignTokens.spacing.sm,
-            paddingHorizontal: DesignTokens.spacing.md,
-            minHeight: DesignTokens.touchTargets.min,
-        },
-        md: {
-            paddingVertical: DesignTokens.spacing.md,
-            paddingHorizontal: DesignTokens.spacing.lg,
-            minHeight: DesignTokens.touchTargets.comfortable,
-        },
-        lg: {
-            paddingVertical: DesignTokens.spacing.md + 4,
-            paddingHorizontal: DesignTokens.spacing.xl,
-            minHeight: DesignTokens.touchTargets.large,
-        },
+    const handlePressIn = () => {
+        if (isDisabled) return;
+        pressScale.value = withSpring(0.96, { damping: 15, stiffness: 400 });
+        pressOpacity.value = withTiming(0.9, { duration: 100 });
     };
 
-    // Text size styles
-    const textSizeStyles = {
-        sm: DesignTokens.typography.smallBold,
-        md: DesignTokens.typography.bodyBold,
-        lg: DesignTokens.typography.h3,
+    const handlePressOut = () => {
+        pressScale.value = withSpring(1, { damping: 15, stiffness: 300 });
+        pressOpacity.value = withTiming(1, { duration: 150 });
     };
 
-    // Variant styles
+    // Get variant styles
     const getVariantStyles = () => {
         switch (variant) {
             case 'primary':
                 return {
                     container: styles.primaryContainer,
                     text: styles.primaryText,
-                    gradient: Colors.gradients.primarySimple,
+                    spinnerColor: '#FFFFFF',
+                    useGradient: false,
+                    shadowStyle: styles.primaryShadow,
                 };
             case 'secondary':
                 return {
                     container: styles.secondaryContainer,
                     text: styles.secondaryText,
-                    gradient: null,
+                    spinnerColor: Colors.text,
+                    useGradient: false,
+                    shadowStyle: styles.secondaryShadow,
                 };
-            case 'tertiary':
+            case 'outline':
                 return {
-                    container: styles.tertiaryContainer,
-                    text: styles.tertiaryText,
-                    gradient: null,
+                    container: styles.outlineContainer,
+                    text: styles.outlineText,
+                    spinnerColor: Colors.primary,
+                    useGradient: false,
+                    shadowStyle: null,
+                };
+            case 'ghost':
+                return {
+                    container: styles.ghostContainer,
+                    text: styles.ghostText,
+                    spinnerColor: Colors.primary,
+                    useGradient: false,
+                    shadowStyle: null,
                 };
             case 'danger':
                 return {
                     container: styles.dangerContainer,
                     text: styles.dangerText,
-                    gradient: Colors.gradients.error,
+                    spinnerColor: '#FFFFFF',
+                    useGradient: false,
+                    shadowStyle: styles.dangerShadow,
+                };
+            case 'success':
+                return {
+                    container: styles.successContainer,
+                    text: styles.successText,
+                    spinnerColor: '#FFFFFF',
+                    useGradient: false,
+                    shadowStyle: styles.successShadow,
+                };
+            case 'gradient':
+                return {
+                    container: styles.gradientContainer,
+                    text: styles.gradientText,
+                    spinnerColor: '#FFFFFF',
+                    useGradient: true,
+                    shadowStyle: styles.primaryShadow,
                 };
             default:
                 return {
                     container: styles.primaryContainer,
                     text: styles.primaryText,
-                    gradient: Colors.gradients.primarySimple,
+                    spinnerColor: '#FFFFFF',
+                    useGradient: false,
+                    shadowStyle: styles.primaryShadow,
                 };
         }
     };
 
     const variantStyles = getVariantStyles();
-    const currentSizeStyle = sizeStyles[size];
-    const currentTextStyle = textSizeStyles[size];
 
-    // Render button content
+    const containerStyle = [
+        styles.button,
+        {
+            minHeight: sizeConfig.height,
+            paddingHorizontal: sizeConfig.paddingHorizontal,
+        },
+        variantStyles.container,
+        !isDisabled && variantStyles.shadowStyle,
+        fullWidth && styles.fullWidth,
+        isDisabled && styles.disabled,
+        style,
+    ];
+
+    const textStyles = [
+        styles.buttonText,
+        { fontSize: sizeConfig.fontSize },
+        variantStyles.text,
+        textStyle,
+    ];
+
     const renderContent = () => (
         <View style={styles.content}>
             {loading ? (
-                <ActivityIndicator
-                    size="small"
-                    color={variant === 'primary' || variant === 'danger' ? Colors.text : Colors.primary}
+                <ActivityIndicator 
+                    size="small" 
+                    color={variantStyles.spinnerColor} 
                 />
             ) : (
                 <>
-                    {leftIcon && <View style={styles.leftIcon}>{leftIcon}</View>}
-                    <Text
-                        style={[
-                            currentTextStyle,
-                            variantStyles.text,
-                            isDisabled && styles.disabledText,
-                            textStyle,
-                        ]}
-                    >
-                        {title}
-                    </Text>
-                    {rightIcon && <View style={styles.rightIcon}>{rightIcon}</View>}
+                    {leftIcon && <View style={styles.iconLeft}>{leftIcon}</View>}
+                    <Text style={textStyles}>{title}</Text>
+                    {rightIcon && <View style={styles.iconRight}>{rightIcon}</View>}
                 </>
             )}
         </View>
     );
 
-    // Primary and Danger use gradient
-    if (variantStyles.gradient && (variant === 'primary' || variant === 'danger')) {
-        return (
-            <TouchableOpacity
-                onPress={handlePress}
-                disabled={isDisabled}
-                activeOpacity={0.8}
-                style={[
-                    styles.button,
-                    currentSizeStyle,
-                    fullWidth && styles.fullWidth,
-                    isDisabled && styles.disabled,
-                    style,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel={accessibilityLabel || title}
-                accessibilityHint={accessibilityHint}
-                accessibilityState={{ disabled: isDisabled }}
-            >
-                <LinearGradient
-                    colors={variantStyles.gradient}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={[
-                        styles.gradient,
-                        currentSizeStyle,
-                        isDisabled && styles.disabledGradient,
-                    ]}
-                >
-                    {renderContent()}
-                </LinearGradient>
-            </TouchableOpacity>
-        );
-    }
-
-    // Secondary and Tertiary use solid colors
     return (
-        <TouchableOpacity
+        <AnimatedPressable
             onPress={handlePress}
+            onPressIn={handlePressIn}
+            onPressOut={handlePressOut}
             disabled={isDisabled}
-            activeOpacity={0.7}
-            style={[
-                styles.button,
-                variantStyles.container,
-                currentSizeStyle,
-                fullWidth && styles.fullWidth,
-                isDisabled && styles.disabled,
-                style,
-            ]}
+            style={[containerStyle, animatedContainerStyle]}
             accessibilityRole="button"
             accessibilityLabel={accessibilityLabel || title}
             accessibilityHint={accessibilityHint}
-            accessibilityState={{ disabled: isDisabled }}
+            accessibilityState={{ disabled: isDisabled, busy: loading }}
         >
-            {renderContent()}
-        </TouchableOpacity>
+            {variantStyles.useGradient && !isDisabled ? (
+                <>
+                    <LinearGradient
+                        colors={Colors.gradients.sunset}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                        style={styles.gradientFill}
+                    />
+                    {renderContent()}
+                </>
+            ) : (
+                renderContent()
+            )}
+        </AnimatedPressable>
     );
 };
 
 const styles = StyleSheet.create({
     button: {
-        borderRadius: DesignTokens.borderRadius.md,
+        borderRadius: DesignTokens.borderRadius.xl,
         alignItems: 'center',
         justifyContent: 'center',
-        ...DesignTokens.shadows.sm,
-    },
-    gradient: {
-        borderRadius: DesignTokens.borderRadius.md,
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: '100%',
+        overflow: 'hidden',
     },
     content: {
         flexDirection: 'row',
@@ -232,48 +247,111 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         gap: DesignTokens.spacing.sm,
     },
-    primaryContainer: {
-        backgroundColor: Colors.primary,
+    buttonText: {
+        fontWeight: '700',
+        letterSpacing: 0.3,
     },
-    primaryText: {
-        color: Colors.text,
-    },
-    secondaryContainer: {
-        backgroundColor: 'transparent',
-        borderWidth: 1.5,
-        borderColor: Colors.primary,
-    },
-    secondaryText: {
-        color: Colors.primary,
-    },
-    tertiaryContainer: {
-        backgroundColor: 'transparent',
-    },
-    tertiaryText: {
-        color: Colors.text,
-    },
-    dangerContainer: {
-        backgroundColor: Colors.error,
-    },
-    dangerText: {
-        color: Colors.text,
-    },
-    disabled: {
-        opacity: 0.5,
-    },
-    disabledGradient: {
-        opacity: 0.5,
-    },
-    disabledText: {
-        opacity: 0.7,
+    gradientFill: {
+        ...StyleSheet.absoluteFillObject,
     },
     fullWidth: {
         width: '100%',
     },
-    leftIcon: {
-        marginRight: -DesignTokens.spacing.xs,
+    disabled: {
+        opacity: 0.5,
     },
-    rightIcon: {
-        marginLeft: -DesignTokens.spacing.xs,
+    iconLeft: {
+        marginRight: 2,
+    },
+    iconRight: {
+        marginLeft: 2,
+    },
+
+    // ===== PRIMARY =====
+    primaryContainer: {
+        backgroundColor: Colors.primary,
+    },
+    primaryText: {
+        color: '#FFFFFF',
+    },
+    primaryShadow: {
+        shadowColor: Colors.primary,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.35,
+        shadowRadius: 8,
+        elevation: 6,
+    },
+
+    // ===== SECONDARY =====
+    secondaryContainer: {
+        backgroundColor: Colors.surfaceMuted,
+        borderWidth: 1.5,
+        borderColor: Colors.border,
+    },
+    secondaryText: {
+        color: Colors.text,
+    },
+    secondaryShadow: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+        elevation: 2,
+    },
+
+    // ===== OUTLINE =====
+    outlineContainer: {
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        borderColor: Colors.primary,
+    },
+    outlineText: {
+        color: Colors.primary,
+    },
+
+    // ===== GHOST =====
+    ghostContainer: {
+        backgroundColor: 'transparent',
+    },
+    ghostText: {
+        color: Colors.primary,
+    },
+
+    // ===== DANGER =====
+    dangerContainer: {
+        backgroundColor: Colors.error,
+    },
+    dangerText: {
+        color: '#FFFFFF',
+    },
+    dangerShadow: {
+        shadowColor: Colors.error,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.35,
+        shadowRadius: 8,
+        elevation: 6,
+    },
+
+    // ===== SUCCESS =====
+    successContainer: {
+        backgroundColor: Colors.success,
+    },
+    successText: {
+        color: '#FFFFFF',
+    },
+    successShadow: {
+        shadowColor: Colors.success,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.35,
+        shadowRadius: 8,
+        elevation: 6,
+    },
+
+    // ===== GRADIENT =====
+    gradientContainer: {
+        backgroundColor: 'transparent',
+    },
+    gradientText: {
+        color: '#FFFFFF',
     },
 });

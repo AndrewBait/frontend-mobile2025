@@ -1,3 +1,15 @@
+import { AdaptiveList } from '@/components/base/AdaptiveList';
+import { SkeletonProductCard } from '@/components/base/Skeleton';
+import { EmptyState } from '@/components/feedback/EmptyState';
+import { FilterPanel } from '@/components/FilterPanel';
+import { GradientBackground } from '@/components/GradientBackground';
+import { AnimatedBatchCard } from '@/components/product/AnimatedBatchCard';
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { useAuth } from '@/contexts/AuthContext';
+import { useCart } from '@/contexts/CartContext';
+import { api, Batch } from '@/services/api';
+import { PRODUCT_CATEGORIES } from '@/utils/validation';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
@@ -6,7 +18,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
-    FlatList,
     RefreshControl,
     ScrollView,
     StyleSheet,
@@ -16,19 +27,12 @@ import {
     View
 } from 'react-native';
 import Animated from 'react-native-reanimated';
-import { SkeletonProductCard } from '../../components/base/Skeleton';
-import { EmptyState } from '../../components/feedback/EmptyState';
-import { GradientBackground } from '../../components/GradientBackground';
-import { AnimatedBatchCard } from '../../components/product/AnimatedBatchCard';
-import { Colors } from '../../constants/Colors';
-import { DesignTokens } from '../../constants/designTokens';
-import { useAuth } from '../../contexts/AuthContext';
-import { useCart } from '../../contexts/CartContext';
-import { api, Batch } from '../../services/api';
-import { PRODUCT_CATEGORIES } from '../../utils/validation';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function VitrineScreen() {
-    const { user, isProfileComplete } = useAuth();
+    const insets = useSafeAreaInsets();
+    const screenPaddingTop = insets.top + DesignTokens.spacing.md;
+    const { user } = useAuth();
     const { incrementCartCount, updateCartCache } = useCart();
     const [batches, setBatches] = useState<Batch[]>([]);
     const [loading, setLoading] = useState(true);
@@ -53,6 +57,9 @@ export default function VitrineScreen() {
     const [filterMinPrice, setFilterMinPrice] = useState<string>('');
     const [filterMaxPrice, setFilterMaxPrice] = useState<string>('');
     const [filterMaxDaysToExpire, setFilterMaxDaysToExpire] = useState<number | null>(null);
+    const hasActiveFilters = useMemo(() => {
+        return !!filterMinPrice || !!filterMaxPrice || filterMaxDaysToExpire !== null;
+    }, [filterMinPrice, filterMaxPrice, filterMaxDaysToExpire]);
 
     useFocusEffect(
         useCallback(() => {
@@ -181,7 +188,7 @@ export default function VitrineScreen() {
                 // Handle both PT-BR and EN field names
                 const productData = (batch as any).products || batch.product;
                 const productName = (productData?.nome || productData?.name || '').toLowerCase();
-                const storeName = (batch.store?.name || (batch.store as any)?.nome || '').toLowerCase();
+                const storeName = (batch.store?.nome || batch.store?.name || '').toLowerCase();
                 const category = (productData?.categoria || productData?.category || '').toLowerCase();
                 return productName.includes(query) || storeName.includes(query) || category.includes(query);
             });
@@ -363,25 +370,6 @@ export default function VitrineScreen() {
         }
     };
 
-    const renderCategory = ({ item }: { item: { value: string; label: string } }) => (
-        <TouchableOpacity
-            style={[
-                styles.categoryChip,
-                selectedCategory === item.value && styles.categoryChipActive,
-            ]}
-            onPress={() => setSelectedCategory(
-                selectedCategory === item.value ? null : item.value
-            )}
-        >
-            <Text style={[
-                styles.categoryText,
-                selectedCategory === item.value && styles.categoryTextActive,
-            ]}>
-                {item.label}
-            </Text>
-        </TouchableOpacity>
-    );
-
     const renderBatch = ({ item, index }: { item: Batch; index: number }) => {
         const availableStock = item.disponivel ?? item.stock ?? item.estoque_total ?? 0;
         const selectedQuantity = selectedQuantities[item.id] || 1;
@@ -410,7 +398,7 @@ export default function VitrineScreen() {
     if (loading) {
         return (
             <GradientBackground>
-                <View style={styles.container}>
+                <View style={[styles.container, { paddingTop: screenPaddingTop }]}>
                     {/* Header skeleton */}
                     <View style={styles.header}>
                         <View>
@@ -451,7 +439,7 @@ export default function VitrineScreen() {
 
     return (
         <GradientBackground>
-            <View style={styles.container}>
+            <View style={[styles.container, { paddingTop: screenPaddingTop }]}>
                 {/* Header Compacto */}
                 <Animated.View style={styles.header}>
                     <View style={styles.headerContent}>
@@ -491,7 +479,7 @@ export default function VitrineScreen() {
                         <TouchableOpacity
                             style={[
                                 styles.filterButton,
-                                (showFilters || filterMinPrice || filterMaxPrice || filterMaxDaysToExpire) && styles.filterButtonActive
+                                (showFilters || hasActiveFilters) && styles.filterButtonActive
                             ]}
                             onPress={() => setShowFilters(!showFilters)}
                             activeOpacity={0.7}
@@ -500,123 +488,48 @@ export default function VitrineScreen() {
                             accessibilityHint="Abrir ou fechar painel de filtros"
                         >
                             <Ionicons 
-                                name="filter" 
+                                name={showFilters ? "filter" : "filter-outline"} 
                                 size={22} 
-                                color={(showFilters || filterMinPrice || filterMaxPrice || filterMaxDaysToExpire) ? Colors.primary : Colors.textMuted} 
+                                color={(showFilters || hasActiveFilters) ? Colors.primary : Colors.textMuted} 
                             />
+                            {hasActiveFilters && (
+                                <View style={styles.filterBadge}>
+                                    <Text style={styles.filterBadgeText}>
+                                        {[filterMinPrice, filterMaxPrice, filterMaxDaysToExpire, filterRadius].filter(Boolean).length}
+                                    </Text>
+                                </View>
+                            )}
                         </TouchableOpacity>
                     </View>
                 </View>
 
-                {/* Filtros */}
-                {showFilters && (
-                    <View style={styles.filtersContainer}>
-                        <View style={styles.filterSection}>
-                            <Text style={styles.filterLabel}>Preço (R$)</Text>
-                            <View style={styles.priceFilterRow}>
-                                <View style={styles.priceInputContainer}>
-                                    <Text style={styles.priceInputLabel}>Mín</Text>
-                                    <TextInput
-                                        style={styles.priceInput}
-                                        placeholder="0,00"
-                                        placeholderTextColor={Colors.textMuted}
-                                        value={filterMinPrice}
-                                        onChangeText={(text) => {
-                                            // Allow only numbers and comma
-                                            const cleaned = text.replace(/[^\d,]/g, '').replace(/,/g, ',');
-                                            setFilterMinPrice(cleaned);
-                                        }}
-                                        keyboardType="numeric"
-                                    />
-                                </View>
-                                <Text style={styles.priceSeparator}>até</Text>
-                                <View style={styles.priceInputContainer}>
-                                    <Text style={styles.priceInputLabel}>Máx</Text>
-                                    <TextInput
-                                        style={styles.priceInput}
-                                        placeholder="999,99"
-                                        placeholderTextColor={Colors.textMuted}
-                                        value={filterMaxPrice}
-                                        onChangeText={(text) => {
-                                            // Allow only numbers and comma
-                                            const cleaned = text.replace(/[^\d,]/g, '').replace(/,/g, ',');
-                                            setFilterMaxPrice(cleaned);
-                                        }}
-                                        keyboardType="numeric"
-                                    />
-                                </View>
-                            </View>
-                        </View>
-
-                        <View style={styles.filterSection}>
-                            <Text style={styles.filterLabel}>Vence em (dias)</Text>
-                            <View style={styles.daysFilterRow}>
-                                {[1, 3, 7, 15, 30].map(days => (
-                                    <TouchableOpacity
-                                        key={days}
-                                        style={[
-                                            styles.daysChip,
-                                            filterMaxDaysToExpire === days && styles.daysChipActive
-                                        ]}
-                                        onPress={() => setFilterMaxDaysToExpire(
-                                            filterMaxDaysToExpire === days ? null : days
-                                        )}
-                                    >
-                                        <Text style={[
-                                            styles.daysChipText,
-                                            filterMaxDaysToExpire === days && styles.daysChipTextActive
-                                        ]}>
-                                            ≤ {days} {days === 1 ? 'dia' : 'dias'}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-                        </View>
-
-                        <View style={styles.filterSection}>
-                            <Text style={styles.filterLabel}>Distância (km)</Text>
-                            <View style={styles.radiusFilterRow}>
-                                {[2, 5, 10, 15, 20].map(km => (
-                                    <TouchableOpacity
-                                        key={km}
-                                        style={[
-                                            styles.radiusChip,
-                                            filterRadius === km && styles.radiusChipActive
-                                        ]}
-                                        onPress={() => {
-                                            setFilterRadius(filterRadius === km ? null : km);
-                                            // Atualizar o raio do usuário e recarregar
-                                            if (filterRadius !== km) {
-                                                // Note: Isso atualizaria o raio do usuário permanentemente
-                                                // Pode ser melhor apenas filtrar localmente sem salvar
-                                            }
-                                        }}
-                                    >
-                                        <Text style={[
-                                            styles.radiusChipText,
-                                            filterRadius === km && styles.radiusChipTextActive
-                                        ]}>
-                                            {km} km
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-                        </View>
-
-                        <TouchableOpacity
-                            style={styles.clearFiltersButton}
-                            onPress={() => {
-                                setFilterMinPrice('');
-                                setFilterMaxPrice('');
-                                setFilterMaxDaysToExpire(null);
-                                setFilterRadius(null);
-                            }}
-                        >
-                            <Ionicons name="close-circle" size={16} color={Colors.textMuted} />
-                            <Text style={styles.clearFiltersText}>Limpar filtros</Text>
-                        </TouchableOpacity>
-                    </View>
-                )}
+                {/* Filtros - Usando FilterPanel Component */}
+                <FilterPanel
+                    isOpen={showFilters}
+                    onToggle={() => setShowFilters(!showFilters)}
+                    activeFiltersCount={[filterMinPrice, filterMaxPrice, filterMaxDaysToExpire, filterRadius].filter(Boolean).length}
+                    minPrice={filterMinPrice}
+                    maxPrice={filterMaxPrice}
+                    onMinPriceChange={(text) => {
+                        const cleaned = text.replace(/[^\d,]/g, '').replace(/,/g, ',');
+                        setFilterMinPrice(cleaned);
+                    }}
+                    onMaxPriceChange={(text) => {
+                        const cleaned = text.replace(/[^\d,]/g, '').replace(/,/g, ',');
+                        setFilterMaxPrice(cleaned);
+                    }}
+                    selectedDays={filterMaxDaysToExpire}
+                    onDaysSelect={(days) => setFilterMaxDaysToExpire(days)}
+                    selectedDistance={filterRadius}
+                    onDistanceSelect={(km) => setFilterRadius(km)}
+                    onClear={() => {
+                        setFilterMinPrice('');
+                        setFilterMaxPrice('');
+                        setFilterMaxDaysToExpire(null);
+                        setFilterRadius(null);
+                    }}
+                    hasActiveFilters={hasActiveFilters}
+                />
 
                 {/* Location Info */}
                 {location && (
@@ -680,13 +593,14 @@ export default function VitrineScreen() {
                                 {filteredBatches.length} resultado(s) para &quot;{searchQuery}&quot;
                             </Text>
                         )}
-                        <FlatList
+                        <AdaptiveList
                             data={filteredBatches}
                             renderItem={renderBatch}
                             keyExtractor={(item) => item.id}
                             showsVerticalScrollIndicator={false}
                             contentContainerStyle={styles.productsContainerVertical}
                             style={styles.productsList}
+                            estimatedItemSize={280}
                             refreshControl={
                                 <RefreshControl
                                     refreshing={refreshing}
@@ -704,9 +618,6 @@ export default function VitrineScreen() {
                                 ) : null
                             }
                             removeClippedSubviews={false}
-                            maxToRenderPerBatch={10}
-                            windowSize={10}
-                            initialNumToRender={5}
                         />
                     </View>
                 )}
@@ -718,7 +629,6 @@ export default function VitrineScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        paddingTop: 50,
     },
     loadingContainer: {
         flex: 1,
@@ -731,81 +641,107 @@ const styles = StyleSheet.create({
         fontSize: 14,
     },
     header: {
-        paddingHorizontal: 20,
-        marginBottom: 12,
-        paddingTop: 8,
+        paddingHorizontal: DesignTokens.padding.medium,
+        marginBottom: DesignTokens.spacing.md,
     },
     headerContent: {
         flexDirection: 'column',
     },
     greeting: {
-        ...DesignTokens.typography.small,
+        fontSize: 15,
+        fontWeight: '500',
         color: Colors.textSecondary,
-        marginBottom: DesignTokens.spacing.xs,
+        marginBottom: 4,
     },
     title: {
-        ...DesignTokens.typography.h2,
+        fontSize: 28,
+        fontWeight: '800',
         color: Colors.text,
+        letterSpacing: -0.5,
     },
     locationInfo: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 24,
-        marginBottom: 16,
+        paddingHorizontal: DesignTokens.padding.medium,
+        paddingVertical: 8,
+        marginBottom: DesignTokens.spacing.sm,
         gap: 6,
+        backgroundColor: Colors.primary05,
+        marginHorizontal: DesignTokens.padding.medium,
+        borderRadius: DesignTokens.borderRadius.md,
     },
     locationText: {
-        ...DesignTokens.typography.caption,
-        color: Colors.textSecondary,
+        fontSize: 12,
+        fontWeight: '500',
+        color: Colors.primary,
     },
     categoriesWrapper: {
-        marginBottom: 16,
+        marginBottom: DesignTokens.spacing.md,
     },
     categoriesScroll: {
-        maxHeight: 50,
+        maxHeight: 56,
         flexGrow: 0,
     },
     categoriesContainer: {
-        paddingHorizontal: 20,
-        paddingVertical: 6,
-        gap: 8,
+        paddingHorizontal: DesignTokens.padding.medium,
+        paddingVertical: 4,
+        gap: DesignTokens.spacing.sm,
         flexDirection: 'row',
     },
     categoryChip: {
-        paddingHorizontal: DesignTokens.spacing.md - 2,
-        paddingVertical: DesignTokens.spacing.sm,
+        paddingHorizontal: 18,
+        paddingVertical: 10,
         borderRadius: DesignTokens.borderRadius.full,
-        backgroundColor: Colors.glass,
+        backgroundColor: Colors.backgroundLight,
         borderWidth: 1.5,
-        borderColor: Colors.glassBorder,
+        borderColor: Colors.border,
         marginRight: DesignTokens.spacing.sm,
-        ...DesignTokens.shadows.sm,
-        minHeight: DesignTokens.touchTargets.min - 4,
+        ...DesignTokens.shadows.xs,
     },
     categoryChipActive: {
         backgroundColor: Colors.primary,
         borderColor: Colors.primary,
-        ...DesignTokens.shadows.md,
+        ...DesignTokens.shadows.primary,
     },
     categoryText: {
-        ...DesignTokens.typography.captionBold,
+        fontSize: 13,
+        fontWeight: '600',
         color: Colors.textSecondary,
     },
     categoryTextActive: {
-        color: Colors.text,
+        color: '#FFFFFF',
+        fontWeight: '700',
     },
     filterButton: {
-        padding: DesignTokens.spacing.xs + 2,
-        marginLeft: DesignTokens.spacing.xs,
-        borderRadius: DesignTokens.borderRadius.sm,
-        backgroundColor: 'transparent',
+        padding: 8,
+        marginLeft: 4,
+        borderRadius: DesignTokens.borderRadius.lg,
+        backgroundColor: Colors.surfaceMuted,
         alignItems: 'center',
         justifyContent: 'center',
-        minWidth: DesignTokens.touchTargets.min,
-        minHeight: DesignTokens.touchTargets.min,
+        minWidth: 44,
+        minHeight: 44,
+        position: 'relative',
     },
     filterButtonActive: {
-        backgroundColor: Colors.primary + '20',
+        backgroundColor: Colors.primary10,
+    },
+    filterBadge: {
+        position: 'absolute',
+        top: -4,
+        right: -4,
+        backgroundColor: Colors.error,
+        borderRadius: 10,
+        minWidth: 18,
+        height: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 4,
+    },
+    filterBadgeText: {
+        color: '#FFFFFF',
+        fontSize: 10,
+        fontWeight: '700',
     },
     filtersContainer: {
         backgroundColor: Colors.backgroundCard,
@@ -935,22 +871,21 @@ const styles = StyleSheet.create({
     },
     productsWrapper: {
         flex: 1,
-        paddingBottom: 20,
     },
     productsList: {
         flex: 1,
     },
     productsContainerHorizontal: {
-        paddingHorizontal: 20,
+        paddingHorizontal: DesignTokens.padding.medium,
         paddingVertical: 8,
         paddingTop: 10,
-        paddingBottom: 60,
+        paddingBottom: 100,
         gap: 16,
     },
     productsContainerVertical: {
-        paddingHorizontal: DesignTokens.spacing.lg,
-        paddingVertical: DesignTokens.spacing.md,
-        paddingBottom: DesignTokens.spacing.xxl,
+        paddingHorizontal: DesignTokens.padding.medium,
+        paddingTop: DesignTokens.spacing.sm,
+        paddingBottom: 100,
     },
     productCardHorizontal: {
         width: 280, // Reduzido de 300 para melhor visualização
@@ -1180,13 +1115,13 @@ const styles = StyleSheet.create({
         color: Colors.success,
     },
     discountTag: {
-        backgroundColor: Colors.error + '30',
+        backgroundColor: Colors.error30,
         paddingHorizontal: 10,
         paddingVertical: 5,
         borderRadius: 10,
         marginLeft: 8,
         borderWidth: 1,
-        borderColor: Colors.error + '40',
+        borderColor: Colors.error40,
     },
     discountTagText: {
         fontSize: 13,
@@ -1301,24 +1236,26 @@ const styles = StyleSheet.create({
         width: 100,
     },
     searchContainer: {
-        paddingHorizontal: 20,
-        marginBottom: 12,
+        paddingHorizontal: DesignTokens.padding.medium,
+        marginBottom: DesignTokens.spacing.md,
     },
     searchBar: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: Colors.glass,
-        borderRadius: DesignTokens.borderRadius.md,
-        borderWidth: 1,
-        borderColor: Colors.glassBorder,
+        backgroundColor: Colors.backgroundLight,
+        borderRadius: DesignTokens.borderRadius.xl,
+        borderWidth: 1.5,
+        borderColor: Colors.border,
         paddingHorizontal: DesignTokens.spacing.md,
-        paddingVertical: DesignTokens.spacing.sm + 2,
+        paddingVertical: DesignTokens.spacing.sm + 4,
         gap: DesignTokens.spacing.sm,
-        minHeight: DesignTokens.touchTargets.min,
+        minHeight: 52,
+        ...DesignTokens.shadows.sm,
     },
     searchInput: {
         flex: 1,
-        ...DesignTokens.typography.body,
+        fontSize: 16,
+        fontWeight: '500',
         color: Colors.text,
         padding: 0,
         margin: 0,

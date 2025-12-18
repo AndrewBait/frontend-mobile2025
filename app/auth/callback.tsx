@@ -2,12 +2,12 @@ import { useURL } from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useRef } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { GradientBackground } from '../../components/GradientBackground';
-import { Colors } from '../../constants/Colors';
-import { API_BASE_URL } from '../../constants/config';
-import { api } from '../../services/api';
-import { supabase } from '../../services/supabase';
-import { getGlobalRedirectInProgress, setGlobalRedirectInProgress } from '../../utils/redirectLock';
+import { GradientBackground } from '@/components/GradientBackground';
+import { Colors } from '@/constants/Colors';
+import { API_BASE_URL } from '@/constants/config';
+import { api } from '@/services/api';
+import { supabase } from '@/services/supabase';
+import { getGlobalRedirectInProgress, setGlobalRedirectInProgress } from '@/utils/redirectLock';
 
 export default function AuthCallbackScreen() {
     const params = useLocalSearchParams();

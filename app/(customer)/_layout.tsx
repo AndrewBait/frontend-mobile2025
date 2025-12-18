@@ -2,8 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Tabs, router, usePathname } from 'expo-router';
 import React, { useEffect, useRef } from 'react';
 import { ActivityIndicator, View } from 'react-native';
-import { Colors } from '../../constants/Colors';
-import { useAuth } from '../../contexts/AuthContext';
+import { Colors } from '@/constants/Colors';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Module-level flag to persist across remounts (last resort)
 let globalRedirectInProgress = false;
@@ -12,7 +12,7 @@ export default function CustomerLayout() {
     const { session, loading, isLoggingOut } = useAuth();
     const pathname = usePathname();
     const hasRedirectedRef = useRef(false);
-    const redirectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const redirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const isMountedRef = useRef(true);
 
     // Redirect to login if no session (after logging out)

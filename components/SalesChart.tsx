@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
-import { BarChart, LineChart } from 'react-native-chart-kit';
+import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/Colors';
+import React, { useState } from 'react';
+import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { BarChart, LineChart } from 'react-native-chart-kit';
 
 interface DailySale {
     date: string;
@@ -49,7 +49,6 @@ export function SalesChart({ data, title = 'Vendas' }: SalesChartProps) {
     const totalOrders = counts.reduce((a, b) => a + b, 0);
     const avgDaily = totalSales / displayData.length;
     const maxValue = Math.max(...values, 1);
-    const minValue = Math.min(...values);
 
     // Calculate trend (comparing last 3 days to previous 3 days)
     const lastThree = values.slice(-3).reduce((a, b) => a + b, 0);
@@ -62,7 +61,7 @@ export function SalesChart({ data, title = 'Vendas' }: SalesChartProps) {
         datasets: [
             {
                 data: values.length > 0 ? values : [0],
-                color: (opacity = 1) => `rgba(0, 199, 190, ${opacity})`,
+                color: (opacity = 1) => `rgba(5, 150, 105, ${opacity})`, // Verde #059669
                 strokeWidth: 2,
             },
         ],
@@ -70,17 +69,17 @@ export function SalesChart({ data, title = 'Vendas' }: SalesChartProps) {
 
     const chartConfig = {
         backgroundColor: 'transparent',
-        backgroundGradientFrom: Colors.backgroundCard,
-        backgroundGradientTo: Colors.backgroundCard,
+        backgroundGradientFrom: Colors.backgroundCard, // #FFFFFF
+        backgroundGradientTo: Colors.backgroundCard, // #FFFFFF
         decimalPlaces: 0,
-        color: (opacity = 1) => `rgba(0, 199, 190, ${opacity})`,
-        labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity * 0.7})`,
+        color: (opacity = 1) => `rgba(5, 150, 105, ${opacity})`, // Verde #059669
+        labelColor: (opacity = 1) => `rgba(107, 114, 128, ${opacity})`, // Gray-500 #6B7280
         style: {
             borderRadius: 16,
         },
         propsForBackgroundLines: {
             strokeDasharray: '',
-            stroke: Colors.glassBorder,
+            stroke: '#E5E7EB', // Gray-200
             strokeWidth: 1,
         },
         barPercentage: 0.6,
@@ -261,7 +260,7 @@ const styles = StyleSheet.create({
         borderRadius: 6,
     },
     toggleActive: {
-        backgroundColor: Colors.primary + '30',
+        backgroundColor: Colors.primary30,
     },
     periodSelector: {
         flexDirection: 'row',
@@ -275,7 +274,7 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.glass,
     },
     periodActive: {
-        backgroundColor: Colors.accent + '30',
+        backgroundColor: Colors.accent30,
     },
     periodText: {
         fontSize: 12,
@@ -303,10 +302,10 @@ const styles = StyleSheet.create({
         gap: 4,
     },
     trendUp: {
-        backgroundColor: Colors.success + '20',
+        backgroundColor: Colors.success20,
     },
     trendDown: {
-        backgroundColor: Colors.error + '20',
+        backgroundColor: Colors.error20,
     },
     trendText: {
         fontSize: 12,

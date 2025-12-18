@@ -1,4 +1,11 @@
-// Helper function to convert hex to rgba with opacity
+/**
+ * VenceJá - Design System Colors
+ * 
+ * Paleta moderna e vibrante inspirada em apps de delivery
+ * com foco em sustentabilidade e urgência de compra
+ */
+
+// Helper functions
 const hexToRgba = (hex: string, opacity: number): string => {
     const r = parseInt(hex.slice(1, 3), 16);
     const g = parseInt(hex.slice(3, 5), 16);
@@ -6,96 +13,220 @@ const hexToRgba = (hex: string, opacity: number): string => {
     return `rgba(${r}, ${g}, ${b}, ${opacity})`;
 };
 
-// Helper function to add opacity to hex color (for React Native)
 const addOpacity = (hex: string, opacity: number): string => {
-    // Convert opacity (0-1) to hex (00-FF)
     const alpha = Math.round(opacity * 255).toString(16).padStart(2, '0');
     return `${hex}${alpha}`;
 };
 
+// ===========================================
+// NOVA PALETA - Design Moderno e Vibrante
+// ===========================================
+
+// Primary: Verde Esmeralda Vibrante (Sustentabilidade)
+const PRIMARY = '#10B981';       // Emerald-500 - mais vibrante
+const PRIMARY_DARK = '#059669';  // Emerald-600
+const PRIMARY_LIGHT = '#6EE7B7'; // Emerald-300
+
+// Secondary: Coral/Laranja Quente (Urgência, CTA)
+const SECONDARY = '#FF6B35';     // Coral vibrante
+const SECONDARY_DARK = '#E85A2A';
+const SECONDARY_LIGHT = '#FF8F66';
+
+// Accent: Roxo Moderno (Destaques especiais)
+const ACCENT = '#8B5CF6';        // Violet-500
+const ACCENT_DARK = '#7C3AED';
+const ACCENT_LIGHT = '#A78BFA';
+
+// Status Colors
+const SUCCESS = '#22C55E';       // Green-500
+const ERROR = '#EF4444';         // Red-500
+const WARNING = '#F59E0B';       // Amber-500
+const INFO = '#3B82F6';          // Blue-500
+
 export const Colors = {
-    primary: '#6366F1',
-    primaryDark: '#4F46E5',
-    primaryLight: '#818CF8',
-    secondary: '#EC4899',
-    secondaryDark: '#DB2777',
-    accent: '#14B8A6',
+    // ========== BRAND COLORS ==========
+    primary: PRIMARY,
+    primaryDark: PRIMARY_DARK,
+    primaryLight: PRIMARY_LIGHT,
+    
+    secondary: SECONDARY,
+    secondaryDark: SECONDARY_DARK,
+    secondaryLight: SECONDARY_LIGHT,
+    
+    accent: ACCENT,
+    accentDark: ACCENT_DARK,
+    accentLight: ACCENT_LIGHT,
 
-    // Gradients
-    gradientStart: '#6366F1',
-    gradientMiddle: '#8B5CF6',
-    gradientEnd: '#EC4899',
+    // ========== BACKGROUNDS ==========
+    // Fundo principal - cinza muito claro para contraste
+    background: '#F8FAFC',       // Slate-50
+    backgroundLight: '#FFFFFF',
+    backgroundDark: '#F1F5F9',   // Slate-100
+    
+    // Cards e surfaces
+    backgroundCard: '#FFFFFF',
+    surface: '#FFFFFF',
+    surfaceAlt: '#F8FAFC',
+    surfaceMuted: '#F1F5F9',
+    surfaceElevated: '#FFFFFF',
+    
+    // Input backgrounds
+    inputBackground: '#F8FAFC',
+    inputBackgroundFocused: '#FFFFFF',
 
-    // Background
-    background: '#0F0F23',
-    backgroundLight: '#1A1A2E',
-    backgroundCard: '#16213E',
+    // ========== TEXT COLORS ==========
+    text: '#0F172A',             // Slate-900 - mais escuro
+    textSecondary: '#475569',    // Slate-600
+    textMuted: '#94A3B8',        // Slate-400
+    textLight: '#CBD5E1',        // Slate-300
+    textOnPrimary: '#FFFFFF',
+    textOnSecondary: '#FFFFFF',
 
-    // Text - Melhorado contraste para WCAG AA
-    text: '#FFFFFF',
-    textSecondary: '#B8C5D6', // Aumentado de #94A3B8 para melhor contraste
-    textMuted: '#94A3B8', // Aumentado de #64748B para melhor contraste
+    // ========== STATUS ==========
+    success: SUCCESS,
+    error: ERROR,
+    warning: WARNING,
+    info: INFO,
 
-    // Status
-    success: '#10B981',
-    error: '#EF4444',
-    warning: '#F59E0B',
+    // ========== BORDERS ==========
+    border: '#E2E8F0',           // Slate-200
+    borderLight: '#F1F5F9',      // Slate-100
+    borderStrong: '#CBD5E1',     // Slate-300
+    borderFocus: PRIMARY,
 
-    // Borders - Melhorado contraste
-    border: '#475569', // Mais claro para melhor visibilidade
-    borderLight: '#64748B', // Mais visível
+    // ========== GLASS EFFECTS ==========
+    glass: 'rgba(255, 255, 255, 0.9)',
+    glassSubtle: 'rgba(255, 255, 255, 0.7)',
+    glassStrong: 'rgba(255, 255, 255, 0.95)',
+    glassBorder: 'rgba(255, 255, 255, 0.2)',
+    glassBorderStrong: 'rgba(255, 255, 255, 0.3)',
 
-    // Glass effect - Melhorado contraste
-    glass: 'rgba(255, 255, 255, 0.08)', // Aumentado de 0.05 para melhor visibilidade
-    glassBorder: 'rgba(255, 255, 255, 0.15)', // Aumentado de 0.1 para melhor contraste
+    // ========== OPACITY VARIANTS - Primary ==========
+    primary05: addOpacity(PRIMARY, 0.05),
+    primary10: addOpacity(PRIMARY, 0.1),
+    primary15: addOpacity(PRIMARY, 0.15),
+    primary20: addOpacity(PRIMARY, 0.2),
+    primary25: addOpacity(PRIMARY, 0.25),
+    primary30: addOpacity(PRIMARY, 0.3),
+    primary40: addOpacity(PRIMARY, 0.4),
+    primarySoft: hexToRgba(PRIMARY, 0.1),
 
-    // Opacidades - Primary
-    primary10: addOpacity('#6366F1', 0.1), // 10%
-    primary15: addOpacity('#6366F1', 0.15), // 15%
-    primary20: addOpacity('#6366F1', 0.2), // 20%
-    primary30: addOpacity('#6366F1', 0.3), // 30%
+    // ========== OPACITY VARIANTS - Secondary ==========
+    secondary05: addOpacity(SECONDARY, 0.05),
+    secondary10: addOpacity(SECONDARY, 0.1),
+    secondary15: addOpacity(SECONDARY, 0.15),
+    secondary20: addOpacity(SECONDARY, 0.2),
+    secondary25: addOpacity(SECONDARY, 0.25),
+    secondary30: addOpacity(SECONDARY, 0.3),
+    secondary40: addOpacity(SECONDARY, 0.4),
 
-    // Opacidades - Secondary
-    secondary10: addOpacity('#EC4899', 0.1),
-    secondary15: addOpacity('#EC4899', 0.15),
-    secondary20: addOpacity('#EC4899', 0.2),
-    secondary30: addOpacity('#EC4899', 0.3),
+    // ========== OPACITY VARIANTS - Success ==========
+    success05: addOpacity(SUCCESS, 0.05),
+    success10: addOpacity(SUCCESS, 0.1),
+    success15: addOpacity(SUCCESS, 0.15),
+    success20: addOpacity(SUCCESS, 0.2),
+    success25: addOpacity(SUCCESS, 0.25),
+    success30: addOpacity(SUCCESS, 0.3),
+    success40: addOpacity(SUCCESS, 0.4),
 
-    // Opacidades - Success
-    success10: addOpacity('#10B981', 0.1),
-    success15: addOpacity('#10B981', 0.15),
-    success20: addOpacity('#10B981', 0.2),
-    success30: addOpacity('#10B981', 0.3),
+    // ========== OPACITY VARIANTS - Error ==========
+    error05: addOpacity(ERROR, 0.05),
+    error10: addOpacity(ERROR, 0.1),
+    error15: addOpacity(ERROR, 0.15),
+    error20: addOpacity(ERROR, 0.2),
+    error25: addOpacity(ERROR, 0.25),
+    error30: addOpacity(ERROR, 0.3),
+    error40: addOpacity(ERROR, 0.4),
 
-    // Opacidades - Error
-    error10: addOpacity('#EF4444', 0.1),
-    error15: addOpacity('#EF4444', 0.15),
-    error20: addOpacity('#EF4444', 0.2),
-    error30: addOpacity('#EF4444', 0.3),
+    // ========== OPACITY VARIANTS - Warning ==========
+    warning05: addOpacity(WARNING, 0.05),
+    warning10: addOpacity(WARNING, 0.1),
+    warning15: addOpacity(WARNING, 0.15),
+    warning20: addOpacity(WARNING, 0.2),
+    warning25: addOpacity(WARNING, 0.25),
+    warning30: addOpacity(WARNING, 0.3),
+    warning40: addOpacity(WARNING, 0.4),
 
-    // Opacidades - Warning
-    warning10: addOpacity('#F59E0B', 0.1),
-    warning15: addOpacity('#F59E0B', 0.15),
-    warning20: addOpacity('#F59E0B', 0.2),
-    warning30: addOpacity('#F59E0B', 0.3),
+    // ========== OPACITY VARIANTS - Accent ==========
+    accent05: addOpacity(ACCENT, 0.05),
+    accent10: addOpacity(ACCENT, 0.1),
+    accent15: addOpacity(ACCENT, 0.15),
+    accent20: addOpacity(ACCENT, 0.2),
+    accent25: addOpacity(ACCENT, 0.25),
+    accent30: addOpacity(ACCENT, 0.3),
+    accent40: addOpacity(ACCENT, 0.4),
 
-    // Estados interativos
-    pressed: 'rgba(255, 255, 255, 0.1)',
-    hover: 'rgba(255, 255, 255, 0.05)',
-    disabled: 'rgba(255, 255, 255, 0.3)',
-    disabledBackground: 'rgba(255, 255, 255, 0.05)',
+    // ========== INTERACTIVE STATES ==========
+    pressed: 'rgba(0, 0, 0, 0.08)',
+    hover: 'rgba(0, 0, 0, 0.04)',
+    disabled: 'rgba(0, 0, 0, 0.26)',
+    disabledBackground: '#F1F5F9',
+    ripple: 'rgba(16, 185, 129, 0.2)',
 
-    // Gradientes pré-definidos
+    // ========== GRADIENTS ==========
     gradients: {
-        primary: ['#6366F1', '#8B5CF6', '#EC4899'],
-        primarySimple: ['#6366F1', '#EC4899'],
-        success: ['#10B981', '#059669'],
-        error: ['#EF4444', '#DC2626'],
-        warning: ['#F59E0B', '#D97706'],
-        secondary: ['#EC4899', '#DB2777'],
+        // Gradiente principal - Verde vibrante
+        primary: [PRIMARY, PRIMARY_DARK, '#047857'] as const,
+        primarySimple: [PRIMARY, PRIMARY_DARK] as const,
+        primarySoft: ['#ECFDF5', '#D1FAE5'] as const,
+        
+        // Gradiente secundário - Coral quente
+        secondary: [SECONDARY, SECONDARY_DARK] as const,
+        secondarySimple: ['#FF6B35', '#FF8F66'] as const,
+        
+        // Gradiente de destaque - Roxo
+        accent: [ACCENT, ACCENT_DARK] as const,
+        
+        // Gradientes de status
+        success: [SUCCESS, '#16A34A'] as const,
+        error: [ERROR, '#DC2626'] as const,
+        warning: [WARNING, '#D97706'] as const,
+        
+        // Gradiente hero - Para headers e banners
+        hero: ['#10B981', '#059669', '#047857'] as const,
+        
+        // Gradiente sunset - Para promoções
+        sunset: ['#FF6B35', '#F59E0B', '#FBBF24'] as const,
+        
+        // Background gradients
+        backgroundSoft: ['#FFFFFF', '#F8FAFC'] as const,
+        backgroundCard: ['#FFFFFF', '#FEFEFE'] as const,
     },
 
-    // Overlay para modais
-    overlay: 'rgba(0, 0, 0, 0.5)',
-    overlayLight: 'rgba(0, 0, 0, 0.3)',
+    // ========== OVERLAYS ==========
+    overlay: 'rgba(15, 23, 42, 0.6)',      // Slate-900 com opacity
+    overlayLight: 'rgba(15, 23, 42, 0.4)',
+    overlayDark: 'rgba(15, 23, 42, 0.8)',
+
+    // ========== SPECIAL COLORS ==========
+    // Badge de desconto
+    discount: '#EF4444',
+    discountBackground: '#FEF2F2',
+    
+    // Urgência (vencendo)
+    urgent: '#F59E0B',
+    urgentBackground: '#FFFBEB',
+    
+    // Sucesso (economia)
+    savings: '#10B981',
+    savingsBackground: '#ECFDF5',
+    
+    // Favorito
+    favorite: '#EF4444',
+    favoriteActive: '#DC2626',
+
+    // ========== SKELETON ==========
+    skeleton: '#E2E8F0',
+    skeletonHighlight: '#F1F5F9',
+
+    // ========== TAB BAR ==========
+    tabBarBackground: '#FFFFFF',
+    tabBarBorder: '#E2E8F0',
+    tabBarActive: PRIMARY,
+    tabBarInactive: '#94A3B8',
+
+    // Gradientes de fundo
+    gradientStart: PRIMARY,
+    gradientMiddle: '#10B981',
+    gradientEnd: PRIMARY_LIGHT,
 };

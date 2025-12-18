@@ -1,5 +1,7 @@
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, {
     runOnJS,
@@ -8,8 +10,6 @@ import Animated, {
     withSpring,
     withTiming,
 } from 'react-native-reanimated';
-import { Colors } from '../../constants/Colors';
-import { DesignTokens } from '../../constants/designTokens';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
@@ -33,11 +33,33 @@ export const Toast: React.FC<ToastProps> = ({
     onHide,
     action,
 }) => {
+    const [shouldRender, setShouldRender] = useState(visible);
+    const mountedRef = useRef(true);
     const translateY = useSharedValue(-100);
     const opacity = useSharedValue(0);
 
     useEffect(() => {
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
+
+    const handleHidden = useCallback(() => {
+        if (!mountedRef.current) return;
+        setShouldRender(false);
+        onHide?.();
+    }, [onHide]);
+
+    const hideToast = useCallback(() => {
+        translateY.value = withTiming(-100, { duration: DesignTokens.animations.normal });
+        opacity.value = withTiming(0, { duration: DesignTokens.animations.normal }, () => {
+            runOnJS(handleHidden)();
+        });
+    }, [handleHidden, opacity, translateY]);
+
+    useEffect(() => {
         if (visible) {
+            setShouldRender(true);
             translateY.value = withSpring(0, {
                 damping: 15,
                 stiffness: 150,
@@ -50,19 +72,10 @@ export const Toast: React.FC<ToastProps> = ({
                 }, duration);
                 return () => clearTimeout(timer);
             }
-        } else {
+        } else if (shouldRender) {
             hideToast();
         }
-    }, [visible]);
-
-    const hideToast = () => {
-        translateY.value = withTiming(-100, { duration: DesignTokens.animations.normal });
-        opacity.value = withTiming(0, { duration: DesignTokens.animations.normal }, () => {
-            if (onHide) {
-                runOnJS(onHide)();
-            }
-        });
-    };
+    }, [duration, hideToast, opacity, shouldRender, translateY, visible]);
 
     const animatedStyle = useAnimatedStyle(() => {
         return {
@@ -75,38 +88,38 @@ export const Toast: React.FC<ToastProps> = ({
         switch (type) {
             case 'success':
                 return {
-                    backgroundColor: Colors.success20,
-                    borderColor: Colors.success,
+                    backgroundColor: '#DCFCE7', // Green-100
+                    borderColor: Colors.primary, // #059669
                     icon: 'checkmark-circle' as const,
-                    iconColor: Colors.success,
+                    iconColor: Colors.primary, // #059669
                 };
             case 'error':
                 return {
-                    backgroundColor: Colors.error20,
-                    borderColor: Colors.error,
+                    backgroundColor: '#FEE2E2', // Red-100
+                    borderColor: Colors.error, // #EF4444
                     icon: 'alert-circle' as const,
-                    iconColor: Colors.error,
+                    iconColor: Colors.error, // #EF4444
                 };
             case 'warning':
                 return {
-                    backgroundColor: Colors.warning20,
-                    borderColor: Colors.warning,
+                    backgroundColor: '#FEF3C7', // Amber-100
+                    borderColor: Colors.warning, // #FB923C
                     icon: 'warning' as const,
-                    iconColor: Colors.warning,
+                    iconColor: Colors.warning, // #FB923C
                 };
             default:
                 return {
-                    backgroundColor: Colors.primary20,
-                    borderColor: Colors.primary,
+                    backgroundColor: '#EFF6FF', // Blue-100
+                    borderColor: '#3B82F6', // Blue-500
                     icon: 'information-circle' as const,
-                    iconColor: Colors.primary,
+                    iconColor: '#3B82F6', // Blue-500
                 };
         }
     };
 
     const typeStyles = getTypeStyles();
 
-    if (!visible && opacity.value === 0) {
+    if (!shouldRender) {
         return null;
     }
 
@@ -144,7 +157,7 @@ let toastState: ToastState = {
     visible: false,
 };
 
-let toastListeners: Array<(state: ToastState) => void> = [];
+let toastListeners: ((state: ToastState) => void)[] = [];
 
 export const useToast = () => {
     const [state, setState] = React.useState<ToastState>(toastState);
@@ -211,7 +224,7 @@ const styles = StyleSheet.create({
     },
     message: {
         ...DesignTokens.typography.body,
-        color: Colors.text,
+        color: Colors.text, // Texto escuro para contraste
         flex: 1,
     },
     actionButton: {

@@ -1,34 +1,38 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import {
     ActivityIndicator,
-    FlatList,
-    Image,
+    Alert,
     RefreshControl,
     StyleSheet,
     Text,
     TouchableOpacity,
     View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
     useAnimatedStyle,
     useSharedValue,
     withSpring,
     withTiming,
 } from 'react-native-reanimated';
-import { Badge } from '../../components/base/Badge';
-import { Button } from '../../components/base/Button';
-import { EmptyState } from '../../components/feedback/EmptyState';
-import { GradientBackground } from '../../components/GradientBackground';
-import { Colors } from '../../constants/Colors';
-import { DesignTokens } from '../../constants/designTokens';
-import { useCart } from '../../contexts/CartContext';
-import { api, Batch } from '../../services/api';
+import { AdaptiveList } from '@/components/base/AdaptiveList';
+import { Badge } from '@/components/base/Badge';
+import { Button } from '@/components/base/Button';
+import { EmptyState } from '@/components/feedback/EmptyState';
+import { GradientBackground } from '@/components/GradientBackground';
+import { Colors } from '@/constants/Colors';
+import { DesignTokens } from '@/constants/designTokens';
+import { useCart } from '@/contexts/CartContext';
+import { api, Batch } from '@/services/api';
 
 export default function FavoritesScreen() {
+    const insets = useSafeAreaInsets();
+    const screenPaddingTop = insets.top + DesignTokens.spacing.md;
     const { incrementCartCount, updateCartCache } = useCart();
     const [favorites, setFavorites] = useState<Batch[]>([]);
     const [loading, setLoading] = useState(true);
@@ -194,10 +198,10 @@ export default function FavoritesScreen() {
         }));
 
         // Handle both frontend format and backend format (Portuguese/plural)
-        const productData = (item as any).products || item.product;
+        const productData = item.products || item.product;
         const productName = productData?.nome || productData?.name || 'Produto';
         const productPhoto = productData?.foto1 || productData?.photo1 || null;
-        const storeName = item.store?.name || (item.store as any)?.nome || 'Loja';
+        const storeName = item.store?.nome || item.store?.name || 'Loja';
         
         // Handle price fields (Portuguese/English)
         const originalPrice = item.original_price ?? item.preco_normal_override ?? productData?.preco_normal ?? 0;
@@ -217,7 +221,8 @@ export default function FavoritesScreen() {
                     <Image
                         source={{ uri: productPhoto }}
                         style={styles.productImage}
-                        resizeMode="cover"
+                        contentFit="cover"
+                        transition={200}
                     />
                 ) : (
                     <View style={[styles.productImage, styles.imagePlaceholder]}>
@@ -252,10 +257,7 @@ export default function FavoritesScreen() {
                     <View style={styles.actionsRow}>
                         <Button
                             title="Adicionar"
-                            onPress={(e: any) => {
-                                e?.stopPropagation();
-                                onAddToCart(item);
-                            }}
+                            onPress={() => onAddToCart(item)}
                             variant="primary"
                             size="sm"
                             leftIcon={<Ionicons name="cart" size={16} color={Colors.text} />}
@@ -305,7 +307,7 @@ export default function FavoritesScreen() {
 
     return (
         <GradientBackground>
-            <View style={styles.container}>
+            <View style={[styles.container, { paddingTop: screenPaddingTop }]}>
                 {/* Header */}
                 <View style={styles.header}>
                     <Text style={styles.title}>Favoritos</Text>
@@ -321,12 +323,13 @@ export default function FavoritesScreen() {
                         onAction={() => router.push('/(customer)')}
                     />
                 ) : (
-                    <FlatList
+                    <AdaptiveList
                         data={favorites}
                         renderItem={renderFavorite}
                         keyExtractor={(item) => item.id}
                         contentContainerStyle={styles.listContent}
                         showsVerticalScrollIndicator={false}
+                        estimatedItemSize={140}
                         refreshControl={
                             <RefreshControl
                                 refreshing={refreshing}
@@ -334,10 +337,7 @@ export default function FavoritesScreen() {
                                 tintColor={Colors.primary}
                             />
                         }
-                        removeClippedSubviews={true}
-                        maxToRenderPerBatch={10}
-                        windowSize={10}
-                        initialNumToRender={5}
+                        removeClippedSubviews
                     />
                 )}
             </View>
@@ -348,7 +348,6 @@ export default function FavoritesScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        paddingTop: 60,
     },
     loadingContainer: {
         flex: 1,
