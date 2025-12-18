@@ -39,13 +39,14 @@ export default function CartScreen() {
     const insets = useSafeAreaInsets();
     const screenPaddingTop = insets.top + DesignTokens.spacing.md;
     const { isProfileComplete } = useAuth();
-    const { updateCartCache, getCachedCart, cacheTimestamp } = useCart();
+    const { updateCartCache, getCachedCart, cacheTimestamp, decrementCartCount, invalidateCache } = useCart();
     const [groupedCart, setGroupedCart] = useState<GroupedCart[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [showProfileModal, setShowProfileModal] = useState(false);
     const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
     const isLoadingCartRef = React.useRef(false);
+    const isRemovingItemRef = React.useRef(false);
 
     // Helper para normalizar os dados (Padrão Adapter)
     const getBatchFromItem = (item: CartItem): Batch | null => {
@@ -60,7 +61,7 @@ export default function CartScreen() {
     // Função auxiliar para processar dados do carrinho (suporta Cart e MultiCart)
     const processCartData = useCallback((cartData: Cart | MultiCart) => {
         if (!cartData) {
-            console.log('Cart is empty or invalid, setting empty cart');
+            console.log('[Cart] Cart is empty or invalid, setting empty cart');
             setGroupedCart([]);
             return;
         }
@@ -72,7 +73,11 @@ export default function CartScreen() {
             console.log('[Cart] Processing MultiCart with', cartData.carts.length, 'carts');
             
             cartData.carts.forEach((cart) => {
-                if (!cart.items || cart.items.length === 0) return;
+                // IMPORTANTE: Filtrar carrinhos vazios
+                if (!cart.items || cart.items.length === 0) {
+                    console.log('[Cart] Ignorando carrinho vazio:', cart.id);
+                    return;
+                }
                 
                 const storeData = cart.store || cart.stores;
                 grouped.push({
@@ -143,12 +148,18 @@ export default function CartScreen() {
 
     useFocusEffect(
         useCallback(() => {
+            // Não recarregar se estiver removendo item
+            if (isRemovingItemRef.current) {
+                console.log('[Cart] Ignorando recarregamento durante remoção de item');
+                return;
+            }
+            
             // Verificar se há cache recente antes de recarregar
             const cachedCart = getCachedCart();
             const cacheAge = cacheTimestamp > 0 ? Date.now() - cacheTimestamp : Infinity;
             const CACHE_VALIDITY_MS = 5000; // 5 segundos - mesmo do CartContext
             
-            if (cachedCart && cacheAge < CACHE_VALIDITY_MS) {
+            if (cachedCart && cacheAge < CACHE_VALIDITY_MS && !isRemovingItemRef.current) {
                 console.log('[Cart] Cache recente encontrado (idade:', cacheAge, 'ms), usando cache sem recarregar');
                 // Apenas processar cache existente, não recarregar
                 processCartData(cachedCart);
@@ -176,6 +187,12 @@ export default function CartScreen() {
             return;
         }
         
+        // Não recarregar se estiver removendo item
+        if (isRemovingItemRef.current) {
+            console.log('[Cart] Ignorando loadCart durante remoção de item');
+            return;
+        }
+        
         console.log('[Cart] Loading cart...');
         isLoadingCartRef.current = true;
         
@@ -185,7 +202,7 @@ export default function CartScreen() {
             const cacheAge = cacheTimestamp > 0 ? Date.now() - cacheTimestamp : Infinity;
             const CACHE_VALIDITY_MS = 5000;
             
-            if (cachedCart && cacheAge < CACHE_VALIDITY_MS) {
+            if (cachedCart && cacheAge < CACHE_VALIDITY_MS && !isRemovingItemRef.current) {
                 console.log('[Cart] Cache recente encontrado (idade:', cacheAge, 'ms), usando cache sem recarregar');
                 // Usar cache e atualizar em background apenas se cache tem mais de 3s
                 const cart = cachedCart;
@@ -245,9 +262,25 @@ export default function CartScreen() {
                     text: 'Remover',
                     style: 'destructive',
                     onPress: async () => {
+                        // Marcar que está removendo para evitar recarregamentos
+                        isRemovingItemRef.current = true;
+                        
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                         try {
                             console.log('[Cart] Removendo item com batchId:', batchId);
+                            
+                            // Buscar quantidade antes de remover para atualizar badge
+                            const itemToRemove = groupedCart
+                                .flatMap(store => store.items)
+                                .find(item => {
+                                    const itemBatchId = item.batch_id || item.product_batch_id;
+                                    return itemBatchId === batchId;
+                                });
+                            const quantityToRemove = itemToRemove?.quantity || 0;
+
+                            // Invalidar cache ANTES de remover para evitar usar cache antigo
+                            invalidateCache();
+                            
                             // Atualização otimista - remover da UI imediatamente
                             setGroupedCart(prev => {
                                 const updated = prev.map(store => ({
@@ -269,15 +302,51 @@ export default function CartScreen() {
                                 }));
                             });
                             
+                            // Atualizar badge imediatamente
+                            if (quantityToRemove > 0) {
+                                decrementCartCount(quantityToRemove);
+                            }
+                            
                             // Remover do backend
                             try {
                                 const result = await api.removeFromCart(batchId);
                                 
-                                // Atualizar cache e UI com resposta
-                                updateCartCache(result);
-                                processCartData(result);
+                                console.log('[Cart] Resultado da remoção:', {
+                                    hasCarts: !!(result as any)?.carts,
+                                    cartsCount: (result as any)?.carts?.length || 0,
+                                    hasItems: !!(result as any)?.items,
+                                    itemsCount: (result as any)?.items?.length || 0,
+                                    resultKeys: Object.keys(result || {}),
+                                });
+                                
+                                // Verificar se o resultado está realmente vazio
+                                const isEmpty = isMultiCart(result) 
+                                    ? (!result.carts || result.carts.length === 0)
+                                    : (!result.items || result.items.length === 0);
+                                
+                                if (isEmpty) {
+                                    console.log('[Cart] Carrinho ficou vazio após remoção');
+                                    setGroupedCart([]);
+                                    // Atualizar cache com carrinho vazio
+                                    updateCartCache({ items: [], total: 0 });
+                                } else {
+                                    // Atualizar cache e UI com resposta
+                                    updateCartCache(result);
+                                    processCartData(result);
+                                }
+                                
+                                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                                
+                                // Resetar flag após atualizar cache (garantir que cache está atualizado)
+                                setTimeout(() => {
+                                    isRemovingItemRef.current = false;
+                                }, 500);
                             } catch (removeError) {
                                 // Se houver erro, recarregar carrinho
+                                console.error('[Cart] Erro ao remover do backend:', removeError);
+                                // Invalidar cache e recarregar
+                                invalidateCache();
+                                isRemovingItemRef.current = false; // Resetar flag antes de recarregar
                                 await loadCart();
                                 throw removeError;
                             }
@@ -285,8 +354,9 @@ export default function CartScreen() {
                             console.error('[Cart] Erro ao remover item:', error);
                             Alert.alert('Erro', 'Não foi possível remover o produto. Tente novamente.');
                             // Recarregar carrinho em caso de erro para restaurar estado
+                            invalidateCache();
+                            isRemovingItemRef.current = false; // Resetar flag antes de recarregar
                             await loadCart();
-                            // Não precisa chamar refreshCartCount() - loadCart() já atualiza o cache
                         }
                     }
                 }

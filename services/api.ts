@@ -860,6 +860,25 @@ class ApiClient {
     // Helper para mapear um carrinho individual
     private mapCart(cart: any): Cart {
         const storeData = cart.stores || cart.store;
+        const items = cart.items || [];
+        
+        // Se não tem items, retornar carrinho vazio
+        if (!items || items.length === 0) {
+            return {
+                id: cart.id,
+                store_id: cart.store_id,
+                store: storeData ? {
+                    id: storeData.id,
+                    name: storeData.nome ?? storeData.name,
+                    address: storeData.endereco ?? storeData.address,
+                    logo_url: storeData.logo_url,
+                    phone: storeData.telefone ?? storeData.phone,
+                } : undefined,
+                items: [],
+                total: 0,
+            };
+        }
+        
         return {
             id: cart.id,
             store_id: cart.store_id,
@@ -870,7 +889,7 @@ class ApiClient {
                 logo_url: storeData.logo_url,
                 phone: storeData.telefone ?? storeData.phone,
             } : undefined,
-            items: this.mapCartItems(cart.items),
+            items: this.mapCartItems(items),
             total: cart.total || 0,
         };
     }
@@ -1013,20 +1032,47 @@ class ApiClient {
             body: JSON.stringify({ product_batch_id: batchId }),
         });
         
+        console.log('[API] removeFromCart response:', {
+            hasCarts: !!(response?.carts),
+            cartsCount: response?.carts?.length || 0,
+            hasItems: !!(response?.items),
+            itemsCount: response?.items?.length || 0,
+            responseKeys: Object.keys(response || {}),
+        });
+        
         // Se é multi-cart
         if (response.carts && Array.isArray(response.carts)) {
+            // Filtrar carrinhos vazios
+            const validCarts = response.carts
+                .map((cart: any) => this.mapCart(cart))
+                .filter((cart: Cart) => cart.items && cart.items.length > 0);
+            
+            const total = validCarts.reduce((sum: number, cart: Cart) => sum + (cart.total || 0), 0);
+            
+            // Se todos os carrinhos foram removidos, retornar vazio
+            if (validCarts.length === 0) {
+                return { carts: [], total: 0 };
+            }
+            
             return {
-                carts: response.carts.map((cart: any) => this.mapCart(cart)),
-                total: response.total || 0,
+                carts: validCarts,
+                total,
             };
         }
         
-        // Se retornou vazio
-        if (!response || response.cart === null) {
+        // Se retornou vazio ou formato antigo
+        if (!response || response.cart === null || (!response.items && !response.carts)) {
             return { items: [], total: 0 };
         }
         
-        return this.mapCart(response);
+        const mappedCart = this.mapCart(response);
+        
+        // Se o carrinho mapeado está vazio, retornar formato vazio
+        if (!mappedCart.items || mappedCart.items.length === 0) {
+            return { items: [], total: 0 };
+        }
+        
+        return mappedCart;
     }
 
     async clearCart(): Promise<void> {

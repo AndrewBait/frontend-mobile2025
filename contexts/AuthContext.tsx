@@ -196,12 +196,29 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             await supabaseSignOut();
             console.log('[AuthContext] SignOut do Supabase concluído');
 
-            // Wait a tiny bit to ensure state is cleared
-            await new Promise(resolve => setTimeout(resolve, 100));
+            // Wait a bit longer to ensure state is fully cleared (especially on iOS)
+            await new Promise(resolve => setTimeout(resolve, 300));
 
-            // Navigate to login screen using replace (don't use dismissAll - causes POP_TO_TOP error)
+            // Navigate to login screen - use replace to clear navigation stack
+            // On iOS, we need to ensure the navigation happens after state is cleared
             console.log('[AuthContext] Navegando para /...');
-            router.replace('/');
+            
+            // Use setTimeout to ensure navigation happens after React state updates
+            setTimeout(() => {
+                try {
+                    router.replace('/');
+                    console.log('[AuthContext] ✅ Navegação para login concluída');
+                } catch (navError) {
+                    console.error('[AuthContext] Erro ao navegar para login:', navError);
+                    // Fallback: try push if replace fails
+                    try {
+                        router.push('/');
+                    } catch (pushError) {
+                        console.error('[AuthContext] Erro ao fazer push para login:', pushError);
+                    }
+                }
+            }, 100);
+            
             console.log('[AuthContext] ✅ Logout concluído - LoginScreen deve estar visível agora');
         } catch (error: any) {
             console.error('[AuthContext] Erro durante logout:', error);
