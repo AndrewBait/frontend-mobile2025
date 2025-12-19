@@ -1,6 +1,5 @@
 import { API_BASE_URL } from '@/constants/config';
 import { getAccessToken, refreshAccessToken } from '@/services/supabase';
-import { formatPhoneForBackend } from '@/utils/validation';
 
 // Types based on API contract
 export interface User {
@@ -109,6 +108,14 @@ export interface Batch {
     stores?: Store;
 }
 
+// Batch com joins (product/products, store/stores) já populados quando disponível
+export interface BatchWithRelations extends Batch {
+    product?: Product;
+    products?: Product;
+    store?: Store;
+    stores?: Store;
+}
+
 export interface CartItem {
     id?: string;
     quantity: number;
@@ -119,8 +126,8 @@ export interface CartItem {
     product_batch_id?: string;
 
     // Objeto populado
-    batch?: Batch;
-    product_batches?: Batch;
+    batch?: BatchWithRelations;
+    product_batches?: BatchWithRelations;
 }
 
 export interface Cart {
@@ -136,6 +143,27 @@ export interface Cart {
 export interface MultiCart {
     carts: Cart[];
     total: number;
+}
+
+// Tipos auxiliares para telas que dependem do join (ex: carrinho)
+export interface CartItemWithRelations extends Omit<CartItem, 'batch' | 'product_batches'> {
+    batch?: BatchWithRelations;
+    product_batches?: BatchWithRelations;
+}
+
+export interface CartWithRelations extends Omit<Cart, 'items'> {
+    items: CartItemWithRelations[];
+}
+
+export interface MultiCartWithRelations extends Omit<MultiCart, 'carts'> {
+    carts: CartWithRelations[];
+}
+
+export interface Favorite {
+    id: string; // favorite id
+    product_batch_id: string; // batch id
+    created_at?: string;
+    product_batches: Batch;
 }
 
 export interface Payment {
@@ -187,6 +215,43 @@ export interface OrderItem {
 class ApiClient {
     private networkErrorCount: Map<string, number> = new Map();
     private lastNetworkErrorTime: Map<string, number> = new Map();
+
+    private extractApiErrorMessage(payload: any, statusCode: number): string {
+        const candidates = [
+            payload?.message,
+            payload?.error,
+            payload?.msg,
+            payload?.error_description,
+            payload,
+        ];
+
+        for (const value of candidates) {
+            if (!value) continue;
+
+            if (Array.isArray(value)) {
+                const parts = value
+                    .map((v) => (typeof v === 'string' ? v : null))
+                    .filter(Boolean) as string[];
+                if (parts.length > 0) return parts.join(', ');
+            }
+
+            if (typeof value === 'string') {
+                const trimmed = value.trim();
+                if (trimmed) return trimmed;
+            }
+        }
+
+        if (payload && typeof payload === 'object') {
+            try {
+                const asString = JSON.stringify(payload);
+                if (asString && asString !== '{}') return asString;
+            } catch {
+                // ignore
+            }
+        }
+
+        return `API Error: ${statusCode}`;
+    }
 
     private async request<T>(
         endpoint: string,
@@ -256,15 +321,27 @@ class ApiClient {
             }
 
             if (!response.ok) {
-                const error = await response.json().catch(() => ({}));
                 const statusCode = response.status;
+                const errorText = await response.text().catch(() => '');
+                const errorPayload =
+                    errorText && errorText.trim()
+                        ? (() => {
+                              try {
+                                  return JSON.parse(errorText);
+                              } catch {
+                                  return { message: errorText };
+                              }
+                          })()
+                        : {};
+
+                const errorMessage = this.extractApiErrorMessage(errorPayload, statusCode);
                 
                 // Erros esperados (409 Conflict, 400 Bad Request, 403 Forbidden para role/permissões)
                 // 403 é esperado quando usuário não tem permissão (ex: store_owner tentando acessar /me/cart)
                 const isCartEndpoint = endpoint.includes('/cart');
                 const isForbiddenRole = statusCode === 403 && (
-                    error.message?.includes('Insufficient role') || 
-                    error.message?.includes('Role not found') ||
+                    errorMessage.includes('Insufficient role') || 
+                    errorMessage.includes('Role not found') ||
                     isCartEndpoint
                 );
                 const isExpectedError = statusCode === 409 || statusCode === 400 || isForbiddenRole;
@@ -276,7 +353,7 @@ class ApiClient {
                         console.log('[API] Erro esperado na resposta:', {
                             status: statusCode,
                             statusText: response.statusText,
-                            message: error.message,
+                            message: errorMessage,
                             endpoint
                         });
                     }
@@ -284,21 +361,21 @@ class ApiClient {
                     console.error('[API] Erro na resposta:', {
                         status: statusCode,
                         statusText: response.statusText,
-                        error,
+                        error: errorPayload,
                         endpoint
                     });
                 }
                 
                 // Criar erro customizado que preserva o status code
-                const apiError: any = new Error(error.message || `API Error: ${statusCode}`);
+                const apiError: any = new Error(errorMessage);
                 apiError.status = statusCode;
                 apiError.statusCode = statusCode;
-                apiError.response = error;
+                apiError.response = errorPayload;
+                apiError.details = errorPayload?.details;
                 throw apiError;
             }
 
             // Check if response has content before parsing JSON
-            const contentType = response.headers.get('content-type');
             const text = await response.text();
             
             // If response is empty, return empty object/array based on endpoint
@@ -441,8 +518,8 @@ class ApiClient {
         
         if (data.role !== undefined) backendData.role = data.role;
         if (data.phone !== undefined) {
-            // Format phone to backend format: +55 11 99999-9999
-            backendData.telefone = formatPhoneForBackend(data.phone);
+            // Backend armazena telefone limpo (somente dígitos)
+            backendData.telefone = String(data.phone).replace(/\D/g, '');
         }
         if (data.name !== undefined) backendData.nome = data.name; // Map name -> nome
         if (data.photo_url !== undefined) backendData.foto_url = data.photo_url;
@@ -586,11 +663,17 @@ class ApiClient {
         const backendData: any = {};
         if (data.product_id !== undefined) backendData.product_id = data.product_id;
         if (data.expiration_date !== undefined) backendData.data_vencimento = data.expiration_date;
+        if (data.data_vencimento !== undefined) backendData.data_vencimento = data.data_vencimento;
+
         if (data.promo_price !== undefined) backendData.preco_promocional = data.promo_price;
+        if (data.preco_promocional !== undefined) backendData.preco_promocional = data.preco_promocional;
         if (data.stock !== undefined || data.estoque_total !== undefined) {
             backendData.estoque_total = data.stock ?? data.estoque_total;
         }
+        if (data.estoque_total !== undefined) backendData.estoque_total = data.estoque_total;
         if (data.status !== undefined) backendData.status = data.status;
+        if (data.active !== undefined) backendData.active = data.active;
+        if (data.is_active !== undefined) backendData.active = data.is_active;
         
         const batch = await this.request<any>(`/batches/${id}`, {
             method: 'PUT',
@@ -801,8 +884,14 @@ class ApiClient {
 
     // ==================== FAVORITES ====================
 
-    async getFavorites(): Promise<Batch[]> {
-        return this.request('/me/favorites');
+    async getFavorites(): Promise<Favorite[]> {
+        const rows = await this.request<any[]>('/me/favorites');
+        return (rows || []).map((row: any) => ({
+            id: row.id,
+            product_batch_id: row.product_batch_id,
+            created_at: row.created_at,
+            product_batches: this.mapBatchFields(row.product_batches),
+        }));
     }
 
     async addFavorite(batchId: string): Promise<void> {
@@ -814,6 +903,12 @@ class ApiClient {
 
     async removeFavorite(id: string): Promise<void> {
         return this.request(`/me/favorites/${id}`, {
+            method: 'DELETE',
+        });
+    }
+
+    async removeFavoriteByBatch(batchId: string): Promise<void> {
+        return this.request(`/me/favorites/batch/${batchId}`, {
             method: 'DELETE',
         });
     }
@@ -960,6 +1055,23 @@ class ApiClient {
         return [];
     }
 
+    /**
+     * Achata todos os itens (Cart ou MultiCart) em um array único.
+     */
+    getAllCartItems(cart: Cart | MultiCart): CartItem[] {
+        return this.getCartsArray(cart).flatMap((c) => c.items || []);
+    }
+
+    /**
+     * Encontra um item no carrinho (Cart ou MultiCart) pelo batchId.
+     */
+    findCartItem(cart: Cart | MultiCart, batchId: string): CartItem | undefined {
+        return this.getAllCartItems(cart).find((item) => {
+            const itemBatchId = item.batch_id || item.product_batch_id;
+            return itemBatchId === batchId;
+        });
+    }
+
     async addToCart(batchId: string, quantity: number = 1, replaceCart: boolean = false): Promise<Cart | MultiCart> {
         console.log('[API] addToCart chamado:', { batchId, quantity, replaceCart });
         try {
@@ -1081,17 +1193,19 @@ class ApiClient {
         });
     }
 
-    async reserveCart(): Promise<void> {
+    async reserveCart(storeId?: string): Promise<void> {
         return this.request('/me/cart/reserve', {
             method: 'POST',
+            body: storeId ? JSON.stringify({ store_id: storeId }) : undefined,
         });
     }
 
     // ==================== ORDERS ====================
 
-    async createOrder(): Promise<Order> {
+    async createOrder(storeId?: string): Promise<Order> {
         const order = await this.request<any>('/me/orders', {
             method: 'POST',
+            body: storeId ? JSON.stringify({ store_id: storeId }) : undefined,
         });
         return this.mapOrderFields(order);
     }

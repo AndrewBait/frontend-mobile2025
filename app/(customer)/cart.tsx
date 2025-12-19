@@ -7,14 +7,13 @@ import { StickyFooter } from '@/components/StickyFooter';
 import { Colors } from '@/constants/Colors';
 import { DesignTokens } from '@/constants/designTokens';
 import { useAuth } from '@/contexts/AuthContext';
-import { useCart } from '@/contexts/CartContext';
 import { api, Batch, Cart, CartItem, MultiCart } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -35,334 +34,240 @@ interface GroupedCart {
     total: number;
 }
 
-export default function CartScreen() {
-    const insets = useSafeAreaInsets();
-    const screenPaddingTop = insets.top + DesignTokens.spacing.md;
-    const { isProfileComplete } = useAuth();
-    const { updateCartCache, getCachedCart, cacheTimestamp, decrementCartCount, invalidateCache } = useCart();
-    const [groupedCart, setGroupedCart] = useState<GroupedCart[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
-    const [showProfileModal, setShowProfileModal] = useState(false);
-    const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
-    const isLoadingCartRef = React.useRef(false);
-    const isRemovingItemRef = React.useRef(false);
+const getBatchFromItem = (item: CartItem): Batch | null => {
+    return item.batch || item.product_batches || null;
+};
 
-    // Helper para normalizar os dados (Padrão Adapter)
-    const getBatchFromItem = (item: CartItem): Batch | null => {
-        return item.batch || item.product_batches || null;
-    };
+const getCartItemBatchId = (item: CartItem): string | undefined => {
+    return item.batch_id || item.product_batch_id || item.batch?.id || item.product_batches?.id;
+};
 
-    // Helper para verificar se é MultiCart
-    const isMultiCart = (cart: Cart | MultiCart): cart is MultiCart => {
-        return 'carts' in cart && Array.isArray(cart.carts);
-    };
+const getPromoPriceFromItem = (item: CartItem): number => {
+    const batch = getBatchFromItem(item);
+    return batch?.promo_price ?? batch?.preco_promocional ?? item.price_snapshot ?? 0;
+};
 
-    // Função auxiliar para processar dados do carrinho (suporta Cart e MultiCart)
-    const processCartData = useCallback((cartData: Cart | MultiCart) => {
-        if (!cartData) {
-            console.log('[Cart] Cart is empty or invalid, setting empty cart');
-            setGroupedCart([]);
-            return;
-        }
+const computeCartTotalFromItems = (items: CartItem[]): number => {
+    return (items || []).reduce((sum, item) => sum + getPromoPriceFromItem(item) * item.quantity, 0);
+};
 
-        const grouped: GroupedCart[] = [];
+const isMultiCart = (cart: Cart | MultiCart): cart is MultiCart => {
+    return 'carts' in cart && Array.isArray(cart.carts);
+};
 
-        // Se é MultiCart (múltiplos carrinhos de lojas diferentes)
-        if (isMultiCart(cartData)) {
-            console.log('[Cart] Processing MultiCart with', cartData.carts.length, 'carts');
-            
-            cartData.carts.forEach((cart) => {
-                // IMPORTANTE: Filtrar carrinhos vazios
-                if (!cart.items || cart.items.length === 0) {
-                    console.log('[Cart] Ignorando carrinho vazio:', cart.id);
-                    return;
-                }
-                
+const groupCartForUI = (cartData?: Cart | MultiCart | null): GroupedCart[] => {
+    if (!cartData) return [];
+
+    if (isMultiCart(cartData)) {
+        return cartData.carts
+            .filter((cart) => Array.isArray(cart.items) && cart.items.length > 0)
+            .map((cart) => {
                 const storeData = cart.store || cart.stores;
-                grouped.push({
-                    storeId: cart.store_id || cart.id || '',
+                const storeId = cart.store_id || cart.id || '';
+
+                return {
+                    storeId,
                     storeName: storeData?.name || storeData?.nome || 'Loja',
                     storeAddress: storeData?.address || storeData?.endereco,
                     storeLogo: storeData?.logo_url,
                     items: cart.items,
-                    total: cart.total || cart.items.reduce((sum, item) => {
-                        const batch = getBatchFromItem(item);
-                        const promoPrice = batch?.promo_price || batch?.preco_promocional || 0;
-                        return sum + (promoPrice * item.quantity);
-                    }, 0),
-                });
-            });
-        } else {
-            // Cart único - agrupar por loja (compatibilidade com formato antigo)
-            if (!Array.isArray(cartData.items) || cartData.items.length === 0) {
-                setGroupedCart([]);
-                return;
-            }
+                    total: cart.total || computeCartTotalFromItems(cart.items),
+                };
+            })
+            .filter((group) => Boolean(group.storeId));
+    }
 
-            const groupedByStore: Record<string, GroupedCart> = {};
+    if (!Array.isArray(cartData.items) || cartData.items.length === 0) return [];
 
-            cartData.items.forEach((item) => {
-                const batch = getBatchFromItem(item);
-                if (!item || !batch) return;
+    const groupedByStore: Record<string, GroupedCart> = {};
 
-                const storeId = batch.store_id || '';
-                const store = batch.store || batch.stores;
-                const storeName = store?.name || store?.nome || 'Loja';
-                const promoPrice = batch.promo_price || batch.preco_promocional || 0;
+    cartData.items.forEach((item) => {
+        const batch = getBatchFromItem(item);
+        if (!batch) return;
 
-                if (!groupedByStore[storeId]) {
-                    groupedByStore[storeId] = {
-                        storeId,
-                        storeName,
-                        storeAddress: store?.address || store?.endereco,
-                        storeLogo: store?.logo_url,
-                        items: [],
-                        total: 0,
-                    };
-                }
+        const storeId = batch.store_id || '';
+        if (!storeId) return;
 
-                groupedByStore[storeId].items.push(item);
-                groupedByStore[storeId].total += promoPrice * item.quantity;
-            });
+        const store = batch.store || batch.stores;
+        const storeName = store?.name || store?.nome || 'Loja';
+        const promoPrice = batch.promo_price ?? batch.preco_promocional ?? 0;
 
-            grouped.push(...Object.values(groupedByStore));
+        if (!groupedByStore[storeId]) {
+            groupedByStore[storeId] = {
+                storeId,
+                storeName,
+                storeAddress: store?.address || store?.endereco,
+                storeLogo: store?.logo_url,
+                items: [],
+                total: 0,
+            };
         }
 
-        setGroupedCart(grouped);
+        groupedByStore[storeId].items.push(item);
+        groupedByStore[storeId].total += promoPrice * item.quantity;
+    });
+
+    return Object.values(groupedByStore);
+};
+
+const removeItemFromCartData = (cartData: Cart | MultiCart, batchId: string): Cart | MultiCart => {
+    const removeFromCart = (cart: Cart): Cart => {
+        const nextItems = (cart.items || []).filter((item) => getCartItemBatchId(item) !== batchId);
+        return {
+            ...cart,
+            items: nextItems,
+            total: computeCartTotalFromItems(nextItems),
+        };
+    };
+
+    if (isMultiCart(cartData)) {
+        const nextCarts = (cartData.carts || [])
+            .map(removeFromCart)
+            .filter((cart) => cart.items.length > 0);
+
+        return {
+            ...cartData,
+            carts: nextCarts,
+            total: nextCarts.reduce((sum, cart) => sum + (cart.total || 0), 0),
+        };
+    }
+
+    return removeFromCart(cartData);
+};
+
+const updateItemQuantityInCartData = (
+    cartData: Cart | MultiCart,
+    batchId: string,
+    quantity: number
+): Cart | MultiCart => {
+    const updateInCart = (cart: Cart): Cart => {
+        const nextItems = (cart.items || []).map((item) => {
+            if (getCartItemBatchId(item) !== batchId) return item;
+            return { ...item, quantity };
+        });
+
+        return {
+            ...cart,
+            items: nextItems,
+            total: computeCartTotalFromItems(nextItems),
+        };
+    };
+
+    if (isMultiCart(cartData)) {
+        const nextCarts = (cartData.carts || []).map(updateInCart);
+        return {
+            ...cartData,
+            carts: nextCarts,
+            total: nextCarts.reduce((sum, cart) => sum + (cart.total || 0), 0),
+        };
+    }
+
+    return updateInCart(cartData);
+};
+
+export default function CartScreen() {
+    const insets = useSafeAreaInsets();
+    const screenPaddingTop = insets.top + DesignTokens.spacing.md;
+    const { isProfileComplete, session, user } = useAuth();
+    const [showProfileModal, setShowProfileModal] = useState(false);
+    const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
+    const enabled = Boolean(session && user && user.role === 'customer');
+    const queryClient = useQueryClient();
+
+    const cartQuery = useQuery<Cart | MultiCart>({
+        queryKey: ['cart'],
+        queryFn: () => api.getCart(),
+        enabled,
+        staleTime: 10_000,
+    });
+
+    const groupedCart = useMemo(() => groupCartForUI(cartQuery.data), [cartQuery.data]);
+
+    useEffect(() => {
+        // Resetar erros de imagem quando o carrinho muda (permite nova tentativa no refresh)
         setImageErrors(new Set());
-        console.log('[Cart] Cart loaded:', grouped.length, 'stores,', 
-            grouped.reduce((sum, store) => sum + store.items.length, 0), 'items');
-    }, []);
+    }, [cartQuery.dataUpdatedAt]);
 
-    // Função para atualizar do backend em background
-    const refreshCartFromBackend = useCallback(async () => {
-        try {
-            const cart = await api.getCart();
-            updateCartCache(cart);
-            processCartData(cart);
-        } catch (error) {
-            console.log('[Cart] Erro ao atualizar carrinho em background:', error);
-        }
-    }, [updateCartCache, processCartData]);
+    const removeItemMutation = useMutation<Cart | MultiCart, unknown, string, { previousCart?: Cart | MultiCart }>({
+        mutationFn: (batchId: string) => api.removeFromCart(batchId),
+        onMutate: async (batchId: string) => {
+            await queryClient.cancelQueries({ queryKey: ['cart'], exact: true });
+            const previousCart = queryClient.getQueryData<Cart | MultiCart>(['cart']);
 
-    useFocusEffect(
-        useCallback(() => {
-            // Não recarregar se estiver removendo item
-            if (isRemovingItemRef.current) {
-                console.log('[Cart] Ignorando recarregamento durante remoção de item');
-                return;
-            }
-            
-            // Verificar se há cache recente antes de recarregar
-            const cachedCart = getCachedCart();
-            const cacheAge = cacheTimestamp > 0 ? Date.now() - cacheTimestamp : Infinity;
-            const CACHE_VALIDITY_MS = 5000; // 5 segundos - mesmo do CartContext
-            
-            if (cachedCart && cacheAge < CACHE_VALIDITY_MS && !isRemovingItemRef.current) {
-                console.log('[Cart] Cache recente encontrado (idade:', cacheAge, 'ms), usando cache sem recarregar');
-                // Apenas processar cache existente, não recarregar
-                processCartData(cachedCart);
-                setLoading(false);
-                // Não fazer refresh em background se cache é muito recente (< 3s)
-                if (cacheAge > 3000) {
-                    // Só atualizar em background se cache tem mais de 3s
-                    setTimeout(() => {
-                        refreshCartFromBackend();
-                    }, 0);
-                }
-                return;
-            }
-            
-            // Só recarregar se cache estiver velho ou não existir
-            loadCart();
-            // eslint-disable-next-line react-hooks/exhaustive-deps
-        }, [cacheTimestamp])
-    );
-
-    const loadCart = async () => {
-        // Evitar múltiplas chamadas simultâneas
-        if (isLoadingCartRef.current) {
-            console.log('[Cart] loadCart já em execução, ignorando chamada duplicada');
-            return;
-        }
-        
-        // Não recarregar se estiver removendo item
-        if (isRemovingItemRef.current) {
-            console.log('[Cart] Ignorando loadCart durante remoção de item');
-            return;
-        }
-        
-        console.log('[Cart] Loading cart...');
-        isLoadingCartRef.current = true;
-        
-        try {
-            // Verificar se há cache recente (< 5 segundos)
-            const cachedCart = getCachedCart();
-            const cacheAge = cacheTimestamp > 0 ? Date.now() - cacheTimestamp : Infinity;
-            const CACHE_VALIDITY_MS = 5000;
-            
-            if (cachedCart && cacheAge < CACHE_VALIDITY_MS && !isRemovingItemRef.current) {
-                console.log('[Cart] Cache recente encontrado (idade:', cacheAge, 'ms), usando cache sem recarregar');
-                // Usar cache e atualizar em background apenas se cache tem mais de 3s
-                const cart = cachedCart;
-                // Processar cache (agrupar por loja)
-                processCartData(cart);
-                setLoading(false);
-                // Não fazer refresh em background se cache é muito recente (< 3s)
-                if (cacheAge > 3000) {
-                    // Só atualizar em background se cache tem mais de 3s
-                    setTimeout(() => {
-                        refreshCartFromBackend();
-                    }, 0);
-                }
-                return;
+            if (previousCart) {
+                queryClient.setQueryData<Cart | MultiCart>(['cart'], removeItemFromCartData(previousCart, batchId));
             }
 
-            // Timeout reduzido de 15s para 5s
-            const fetchCart = api.getCart();
-            const timeoutPromise = new Promise<Cart | MultiCart>((resolve) =>
-                setTimeout(() => {
-                    console.warn('[Cart] Fetch timeout após 5s - retornando carrinho vazio');
-                    resolve({ items: [], total: 0 });
-                }, 5000)
-            );
+            return { previousCart };
+        },
+        onError: (_error, _batchId, context) => {
+            if (context?.previousCart) {
+                queryClient.setQueryData(['cart'], context.previousCart);
+            }
+        },
+        onSuccess: (result) => {
+            queryClient.setQueryData(['cart'], result);
+        },
+    });
 
-            const cart = await Promise.race([fetchCart, timeoutPromise]);
-            processCartData(cart);
-            
-            // Atualizar cache com resposta
-            updateCartCache(cart);
-        } catch (error: any) {
-            console.error('[Cart] Error loading cart:', error?.message || error);
-            // Set empty cart on error instead of crashing
-            setGroupedCart([]);
-            
-            // Não atualizar badge em caso de erro para evitar confusão
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-            isLoadingCartRef.current = false;
-        }
-    };
+    const updateQuantityMutation = useMutation<
+        Cart | MultiCart,
+        unknown,
+        { batchId: string; quantity: number },
+        { previousCart?: Cart | MultiCart }
+    >({
+        mutationFn: ({ batchId, quantity }: { batchId: string; quantity: number }) =>
+            api.updateCartItemQuantity(batchId, quantity),
+        onMutate: async ({ batchId, quantity }) => {
+            await queryClient.cancelQueries({ queryKey: ['cart'], exact: true });
+            const previousCart = queryClient.getQueryData<Cart | MultiCart>(['cart']);
 
-    const onRefresh = () => {
-        setRefreshing(true);
-        loadCart();
-    };
+            if (previousCart) {
+                queryClient.setQueryData<Cart | MultiCart>(
+                    ['cart'],
+                    updateItemQuantityInCartData(previousCart, batchId, quantity)
+                );
+            }
 
-    const handleRemove = async (batchId: string) => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        Alert.alert(
-            'Remover Produto',
-            'Deseja remover este produto do carrinho?',
-            [
+            return { previousCart };
+        },
+        onError: (_error, _variables, context) => {
+            if (context?.previousCart) {
+                queryClient.setQueryData(['cart'], context.previousCart);
+            }
+        },
+        onSuccess: (result) => {
+            queryClient.setQueryData(['cart'], result);
+        },
+    });
+
+    const onRefresh = useCallback(() => {
+        cartQuery.refetch();
+    }, [cartQuery]);
+
+    const handleRemove = useCallback(
+        (batchId: string) => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            Alert.alert('Remover Produto', 'Deseja remover este produto do carrinho?', [
                 { text: 'Cancelar', style: 'cancel' },
                 {
                     text: 'Remover',
                     style: 'destructive',
                     onPress: async () => {
-                        // Marcar que está removendo para evitar recarregamentos
-                        isRemovingItemRef.current = true;
-                        
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                         try {
-                            console.log('[Cart] Removendo item com batchId:', batchId);
-                            
-                            // Buscar quantidade antes de remover para atualizar badge
-                            const itemToRemove = groupedCart
-                                .flatMap(store => store.items)
-                                .find(item => {
-                                    const itemBatchId = item.batch_id || item.product_batch_id;
-                                    return itemBatchId === batchId;
-                                });
-                            const quantityToRemove = itemToRemove?.quantity || 0;
-
-                            // Invalidar cache ANTES de remover para evitar usar cache antigo
-                            invalidateCache();
-                            
-                            // Atualização otimista - remover da UI imediatamente
-                            setGroupedCart(prev => {
-                                const updated = prev.map(store => ({
-                                    ...store,
-                                    items: store.items.filter(item => {
-                                        const itemBatchId = item.batch_id || item.product_batch_id;
-                                        return itemBatchId !== batchId;
-                                    }),
-                                })).filter(store => store.items.length > 0);
-                                
-                                // Recalcular totais
-                                return updated.map(store => ({
-                                    ...store,
-                                    total: store.items.reduce((sum, item) => {
-                                        const batch = getBatchFromItem(item);
-                                        const promoPrice = batch?.promo_price || batch?.preco_promocional || 0;
-                                        return sum + (promoPrice * item.quantity);
-                                    }, 0),
-                                }));
-                            });
-                            
-                            // Atualizar badge imediatamente
-                            if (quantityToRemove > 0) {
-                                decrementCartCount(quantityToRemove);
-                            }
-                            
-                            // Remover do backend
-                            try {
-                                const result = await api.removeFromCart(batchId);
-                                
-                                console.log('[Cart] Resultado da remoção:', {
-                                    hasCarts: !!(result as any)?.carts,
-                                    cartsCount: (result as any)?.carts?.length || 0,
-                                    hasItems: !!(result as any)?.items,
-                                    itemsCount: (result as any)?.items?.length || 0,
-                                    resultKeys: Object.keys(result || {}),
-                                });
-                                
-                                // Verificar se o resultado está realmente vazio
-                                const isEmpty = isMultiCart(result) 
-                                    ? (!result.carts || result.carts.length === 0)
-                                    : (!result.items || result.items.length === 0);
-                                
-                                if (isEmpty) {
-                                    console.log('[Cart] Carrinho ficou vazio após remoção');
-                                    setGroupedCart([]);
-                                    // Atualizar cache com carrinho vazio
-                                    updateCartCache({ items: [], total: 0 });
-                                } else {
-                                    // Atualizar cache e UI com resposta
-                                    updateCartCache(result);
-                                    processCartData(result);
-                                }
-                                
-                                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                                
-                                // Resetar flag após atualizar cache (garantir que cache está atualizado)
-                                setTimeout(() => {
-                                    isRemovingItemRef.current = false;
-                                }, 500);
-                            } catch (removeError) {
-                                // Se houver erro, recarregar carrinho
-                                console.error('[Cart] Erro ao remover do backend:', removeError);
-                                // Invalidar cache e recarregar
-                                invalidateCache();
-                                isRemovingItemRef.current = false; // Resetar flag antes de recarregar
-                                await loadCart();
-                                throw removeError;
-                            }
+                            await removeItemMutation.mutateAsync(batchId);
+                            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                         } catch (error: any) {
                             console.error('[Cart] Erro ao remover item:', error);
                             Alert.alert('Erro', 'Não foi possível remover o produto. Tente novamente.');
-                            // Recarregar carrinho em caso de erro para restaurar estado
-                            invalidateCache();
-                            isRemovingItemRef.current = false; // Resetar flag antes de recarregar
-                            await loadCart();
                         }
-                    }
-                }
-            ]
-        );
-    };
+                    },
+                },
+            ]);
+        },
+        [removeItemMutation]
+    );
 
     const handleCheckout = async (storeId: string) => {
         // Check if profile is complete
@@ -390,73 +295,41 @@ export default function CartScreen() {
         router.push(`/checkout/${storeId}`);
     };
 
-    const handleUpdateQuantity = async (batchId: string, newQuantity: number, maxStock?: number, currentQuantity?: number) => {
-        if (newQuantity < 1) {
-            // Se quantidade for 0, remove o item
-            await handleRemove(batchId);
-            return;
-        }
-
-        // Verificar se não excede o estoque disponível (em tempo real)
-        if (maxStock !== undefined && newQuantity > maxStock) {
-            Alert.alert(
-                'Estoque Insuficiente',
-                `Apenas ${maxStock} unidade(s) disponível(is) em estoque.`,
-                [{ text: 'OK' }]
-            );
-            // Recarregar carrinho para atualizar estoque
-            await loadCart();
-            return;
-        }
-
-        // Atualização otimista - atualizar UI imediatamente
-        setGroupedCart(prev => {
-            return prev.map(store => ({
-                ...store,
-                items: store.items.map(item => {
-                    const itemBatchId = item.batch_id || item.product_batch_id;
-                    if (itemBatchId === batchId) {
-                        return { ...item, quantity: newQuantity };
-                    }
-                    return item;
-                }),
-                total: store.items.reduce((sum, item) => {
-                    const itemBatchId = item.batch_id || item.product_batch_id;
-                    const batch = getBatchFromItem(item);
-                    const promoPrice = batch?.promo_price || batch?.preco_promocional || 0;
-                    const itemQty = itemBatchId === batchId ? newQuantity : item.quantity;
-                    return sum + (promoPrice * itemQty);
-                }, 0)
-            }));
-        });
-
-        try {
-            // Atualizar quantidade diretamente no backend (sem remover/adicionar)
-            console.log('[Cart] Atualizando quantidade:', { batchId, newQuantity });
-            const result = await api.updateCartItemQuantity(batchId, newQuantity);
-            console.log('[Cart] Quantidade atualizada com sucesso');
-            
-            // Usar resposta diretamente para atualizar cache (evita requisição extra)
-            updateCartCache(result);
-            
-            // Processar resultado para atualizar UI
-            processCartData(result);
-        } catch (error: any) {
-            // Em caso de erro, reverter atualização otimista e recarregar
-            console.error('[Cart] Error updating quantity:', error?.message || error);
-            await loadCart(); // Recarregar para restaurar estado correto
-            
-            const errorMessage = error?.message || '';
-            
-            if (errorMessage.includes('outra loja') || errorMessage.includes('carrinho aberto')) {
-                console.log('Erro ao atualizar quantidade - loja diferente detectada. Recarregando carrinho...');
-            } else if (errorMessage.includes('estoque') || errorMessage.includes('stock')) {
-                Alert.alert('Estoque Insuficiente', 'Não há estoque suficiente para esta quantidade.');
-            } else {
-                Alert.alert('Erro', 'Não foi possível atualizar a quantidade.');
+    const handleUpdateQuantity = useCallback(
+        async (batchId: string, newQuantity: number, maxStock?: number, _currentQuantity?: number) => {
+            if (newQuantity < 1) {
+                handleRemove(batchId);
+                return;
             }
-        }
-    };
+
+            if (maxStock !== undefined && newQuantity > maxStock) {
+                Alert.alert(
+                    'Estoque Insuficiente',
+                    `Apenas ${maxStock} unidade(s) disponível(is) em estoque.`,
+                    [{ text: 'OK' }]
+                );
+                await cartQuery.refetch();
+                return;
+            }
+
+            try {
+                await updateQuantityMutation.mutateAsync({ batchId, quantity: newQuantity });
+            } catch (error: any) {
+                console.error('[Cart] Error updating quantity:', error?.message || error);
+                await cartQuery.refetch();
+
+                const errorMessage = error?.message || '';
+                if (errorMessage.includes('outra loja') || errorMessage.includes('carrinho aberto')) {
+                    console.log('Erro ao atualizar quantidade - loja diferente detectada. Recarregando carrinho...');
+                } else if (errorMessage.includes('estoque') || errorMessage.includes('stock')) {
+                    Alert.alert('Estoque Insuficiente', 'Não há estoque suficiente para esta quantidade.');
+                } else {
+                    Alert.alert('Erro', 'Não foi possível atualizar a quantidade.');
+                }
+            }
+        },
+        [cartQuery, handleRemove, updateQuantityMutation]
+    );
 
     const renderCartItem = (item: CartItem) => {
         const batch = getBatchFromItem(item);
@@ -617,7 +490,7 @@ export default function CartScreen() {
             <View style={styles.itemsContainer}>
                 {item.items.map((cartItem) => {
                     // Usar id único do cart_item se disponível, senão usar batch_id
-                    const uniqueKey = cartItem.id || cartItem.batch_id || cartItem.product_batch_id || `item-${Math.random()}`;
+                    const uniqueKey = cartItem.id || getCartItemBatchId(cartItem) || 'item-unknown';
                     return (
                         <React.Fragment key={uniqueKey}>
                             {renderCartItem(cartItem)}
@@ -654,7 +527,9 @@ export default function CartScreen() {
         </View>
     );
 
-    if (loading) {
+    const showInitialLoading = cartQuery.isFetching && !cartQuery.data;
+
+    if (showInitialLoading) {
         return (
             <GradientBackground>
                 <View style={styles.loadingContainer}>
@@ -704,7 +579,7 @@ export default function CartScreen() {
                             estimatedItemSize={420}
                             refreshControl={
                                 <RefreshControl
-                                    refreshing={refreshing}
+                                    refreshing={cartQuery.isFetching && !cartQuery.isPending}
                                     onRefresh={onRefresh}
                                     tintColor={Colors.primary}
                                 />

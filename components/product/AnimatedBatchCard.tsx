@@ -8,11 +8,12 @@
 import { Colors } from '@/constants/Colors';
 import { DesignTokens } from '@/constants/designTokens';
 import { Batch } from '@/services/api';
+import { getOptimizedSupabaseImageUrl } from '@/utils/images';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import React, { memo, useEffect } from 'react';
+import React, { memo, useCallback, useEffect, useMemo } from 'react';
 import {
     StyleSheet,
     Text,
@@ -52,15 +53,17 @@ export const AnimatedBatchCard: React.FC<AnimatedBatchCardProps> = memo(({
     const translateY = useSharedValue(20);
     const pressScale = useSharedValue(1);
 
-    // Entrance animation with stagger
+    // Entrance animation with stagger (otimizado: delay reduzido e limitado)
     useEffect(() => {
-        const delay = index * 50;
-        setTimeout(() => {
-            scale.value = withSpring(1, { damping: 15, stiffness: 150 });
-            opacity.value = withTiming(1, { duration: 250 });
-            translateY.value = withSpring(0, { damping: 15, stiffness: 150 });
+        // Limitar stagger a 10 itens (300ms max) para evitar lag em listas longas
+        const delay = Math.min(index, 10) * 30;
+        const timeoutId = setTimeout(() => {
+            scale.value = withSpring(1, { damping: 18, stiffness: 200 });
+            opacity.value = withTiming(1, { duration: 200 });
+            translateY.value = withSpring(0, { damping: 18, stiffness: 200 });
         }, delay);
-    }, []);
+        return () => clearTimeout(timeoutId);
+    }, [index]);
 
     const animatedStyle = useAnimatedStyle(() => ({
         transform: [
@@ -68,73 +71,102 @@ export const AnimatedBatchCard: React.FC<AnimatedBatchCardProps> = memo(({
             { translateY: translateY.value },
         ],
         opacity: opacity.value,
-    }));
+    }), []);
 
-    const handlePressIn = () => {
+    const handlePressIn = useCallback(() => {
+        'worklet';
         pressScale.value = withSpring(0.98, { damping: 15, stiffness: 400 });
-    };
+    }, []);
 
-    const handlePressOut = () => {
+    const handlePressOut = useCallback(() => {
+        'worklet';
         pressScale.value = withSpring(1, { damping: 15, stiffness: 300 });
-    };
+    }, []);
 
-    // Extract data (handle both PT-BR and EN field names)
-    const productData = batch.products || batch.product;
-    const productName = productData?.nome || productData?.name || 'Produto sem nome';
-    const productPhoto = productData?.foto1 || productData?.photo1 || null;
-    
-    const originalPrice = batch.original_price ?? batch.preco_normal_override ?? productData?.preco_normal ?? 0;
-    const promoPrice = batch.promo_price ?? batch.preco_promocional ?? 0;
-    
-    let discountPercent = batch.discount_percent ?? batch.desconto_percentual ?? 0;
-    if ((discountPercent === 0 || !discountPercent) && originalPrice > promoPrice) {
-        discountPercent = ((originalPrice - promoPrice) / originalPrice) * 100;
-    }
-    discountPercent = Math.round(Math.max(0, Math.min(100, discountPercent || 0)));
-    
-    const storeName = batch.store?.nome || batch.store?.name || 'Loja';
-    const storeLogo = batch.store?.logo_url || null;
-    const storeId = batch.store_id || (batch.store as any)?.id;
-    
-    // Expiration calculation
-    const expirationDate = batch.expiration_date || batch.data_vencimento || null;
-    let daysToExpire: number | null = null;
-    let expirationText = '';
-    
-    if (expirationDate) {
-        const expDate = new Date(expirationDate);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        expDate.setHours(0, 0, 0, 0);
-        daysToExpire = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-        
-        if (daysToExpire < 0) {
-            expirationText = 'Vencido';
-        } else if (daysToExpire === 0) {
-            expirationText = 'Vence hoje!';
-        } else if (daysToExpire === 1) {
-            expirationText = 'Vence amanhã';
-        } else if (daysToExpire <= 7) {
-            expirationText = `${daysToExpire} dias`;
-        } else {
-            expirationText = expDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    // Extract data (memoizado para evitar recálculo)
+    const productData = useMemo(() => batch.products || batch.product, [batch.products, batch.product]);
+    const productName = useMemo(() => productData?.nome || productData?.name || 'Produto sem nome', [productData]);
+    const productPhoto = useMemo(() => productData?.foto1 || productData?.photo1 || null, [productData]);
+
+    // Cálculo de preços (memoizado)
+    const { originalPrice, promoPrice, discountPercent, savings } = useMemo(() => {
+        const original = batch.original_price ?? batch.preco_normal_override ?? productData?.preco_normal ?? 0;
+        const promo = batch.promo_price ?? batch.preco_promocional ?? 0;
+
+        let discount = batch.discount_percent ?? batch.desconto_percentual ?? 0;
+        if ((discount === 0 || !discount) && original > promo) {
+            discount = ((original - promo) / original) * 100;
         }
-    }
+        discount = Math.round(Math.max(0, Math.min(100, discount || 0)));
 
-    const isUrgent = daysToExpire !== null && daysToExpire <= 2;
-    const isExpiringSoon = daysToExpire !== null && daysToExpire <= 7;
-    const isExpired = daysToExpire !== null && daysToExpire < 0;
-    const savings = originalPrice - promoPrice;
-    const imageUri = productPhoto && !imageError ? productPhoto : null;
+        return {
+            originalPrice: original,
+            promoPrice: promo,
+            discountPercent: discount,
+            savings: original - promo,
+        };
+    }, [batch.original_price, batch.preco_normal_override, batch.promo_price, batch.preco_promocional, batch.discount_percent, batch.desconto_percentual, productData?.preco_normal]);
 
-    const handleAddToCartPress = () => {
+    const storeName = useMemo(() => batch.store?.nome || batch.store?.name || 'Loja', [batch.store]);
+    const storeLogo = useMemo(() => batch.store?.logo_url || null, [batch.store]);
+    const storeId = useMemo(() => batch.store_id || batch.store?.id || batch.stores?.id, [batch.store_id, batch.store, batch.stores]);
+
+    // Cálculo de expiração (memoizado - cálculo pesado)
+    const expirationInfo = useMemo(() => {
+        const expirationDate = batch.expiration_date || batch.data_vencimento || null;
+        let daysToExpire: number | null = null;
+        let expirationText = '';
+
+        if (expirationDate) {
+            const expDate = new Date(expirationDate);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            expDate.setHours(0, 0, 0, 0);
+            daysToExpire = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+            if (daysToExpire < 0) {
+                expirationText = 'Vencido';
+            } else if (daysToExpire === 0) {
+                expirationText = 'Vence hoje!';
+            } else if (daysToExpire === 1) {
+                expirationText = 'Vence amanhã';
+            } else if (daysToExpire <= 7) {
+                expirationText = `${daysToExpire} dias`;
+            } else {
+                expirationText = expDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+            }
+        }
+
+        return {
+            daysToExpire,
+            expirationText,
+            isUrgent: daysToExpire !== null && daysToExpire <= 2,
+            isExpiringSoon: daysToExpire !== null && daysToExpire <= 7,
+            isExpired: daysToExpire !== null && daysToExpire < 0,
+        };
+    }, [batch.expiration_date, batch.data_vencimento]);
+
+    const { daysToExpire, expirationText, isUrgent, isExpiringSoon, isExpired } = expirationInfo;
+
+    // URIs de imagem (memoizado)
+    const imageUri = useMemo(() =>
+        !imageError ? getOptimizedSupabaseImageUrl(productPhoto, { width: 400, quality: 80 }) : null,
+        [imageError, productPhoto]
+    );
+    const storeLogoUri = useMemo(() =>
+        getOptimizedSupabaseImageUrl(storeLogo, { width: 200, quality: 80 }),
+        [storeLogo]
+    );
+
+    // Callbacks otimizados
+    const handleAddToCartPress = useCallback(() => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         onAddToCart(batch);
-    };
+    }, [batch, onAddToCart]);
 
-    const handleNavigateToProduct = () => {
+    const handleNavigateToProduct = useCallback(() => {
         router.push(`/product/${batch.id}`);
-    };
+    }, [batch.id]);
 
     return (
         <Animated.View style={[styles.card, animatedStyle]} collapsable={false}>
@@ -186,7 +218,11 @@ export const AnimatedBatchCard: React.FC<AnimatedBatchCardProps> = memo(({
                             params: { storeId }
                         })}
                     >
-                        <Image source={{ uri: storeLogo }} style={styles.storeLogo} contentFit="cover" />
+                        <Image
+                            source={{ uri: storeLogoUri || storeLogo }}
+                            style={styles.storeLogo}
+                            contentFit="cover"
+                        />
                     </TouchableOpacity>
                 )}
             </TouchableOpacity>
@@ -301,6 +337,17 @@ export const AnimatedBatchCard: React.FC<AnimatedBatchCardProps> = memo(({
                 )}
             </View>
         </Animated.View>
+    );
+}, (prevProps, nextProps) => {
+    // Função de comparação customizada para otimizar re-renders
+    // Retornar true significa que os props são iguais (não re-renderizar)
+    return (
+        prevProps.batch.id === nextProps.batch.id &&
+        prevProps.selectedQuantity === nextProps.selectedQuantity &&
+        prevProps.availableStock === nextProps.availableStock &&
+        prevProps.imageError === nextProps.imageError &&
+        prevProps.index === nextProps.index
+        // onQuantityChange, onAddToCart e onImageError são callbacks estáveis (não mudam)
     );
 });
 

@@ -1,6 +1,7 @@
 import { AdaptiveList } from '@/components/base/AdaptiveList';
 import { SkeletonProductCard } from '@/components/base/Skeleton';
 import { EmptyState } from '@/components/feedback/EmptyState';
+import { useToast } from '@/components/feedback/Toast';
 import { FilterPanel } from '@/components/FilterPanel';
 import { GradientBackground } from '@/components/GradientBackground';
 import { AnimatedBatchCard } from '@/components/product/AnimatedBatchCard';
@@ -8,13 +9,14 @@ import { Colors } from '@/constants/Colors';
 import { DesignTokens } from '@/constants/designTokens';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCart } from '@/contexts/CartContext';
+import { useErrorHandler } from '@/hooks/useErrorHandler';
 import { api, Batch } from '@/services/api';
 import { PRODUCT_CATEGORIES } from '@/utils/validation';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -34,13 +36,24 @@ export default function VitrineScreen() {
     const screenPaddingTop = insets.top + DesignTokens.spacing.md;
     const { user } = useAuth();
     const { incrementCartCount, updateCartCache } = useCart();
+    const { showToast } = useToast();
+    const { handleError } = useErrorHandler();
     const [batches, setBatches] = useState<Batch[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [isRevalidating, setIsRevalidating] = useState(false);
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
     const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
+    const [useLocationSearch, setUseLocationSearch] = useState(true);
+    const [autoRadiusKm, setAutoRadiusKm] = useState<number | null>(null);
+    const [locationNotice, setLocationNotice] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
+    const loadBatchesRequestIdRef = useRef(0);
+    const batchesRef = useRef<Batch[]>([]);
+    const hasLoadedWithLocationRef = useRef(false);
+    const suppressNextLoadBatchesRef = useRef(false);
+    const locationToggledByUserRef = useRef(false);
     
     // Paginação
     const [page, setPage] = useState(1);
@@ -63,13 +76,27 @@ export default function VitrineScreen() {
 
     useFocusEffect(
         useCallback(() => {
+            if (suppressNextLoadBatchesRef.current) {
+                suppressNextLoadBatchesRef.current = false;
+                return;
+            }
             loadBatches(true);
-        }, [selectedCategory, location, filterRadius])
+        }, [selectedCategory, location, filterRadius, useLocationSearch])
     );
 
     useEffect(() => {
         getLocation();
     }, []);
+
+    useEffect(() => {
+        batchesRef.current = batches;
+    }, [batches]);
+
+    useEffect(() => {
+        setAutoRadiusKm(null);
+        setLocationNotice(null);
+        hasLoadedWithLocationRef.current = false;
+    }, [location?.lat, location?.lng]);
 
     const getLocation = async () => {
         try {
@@ -87,12 +114,22 @@ export default function VitrineScreen() {
     };
 
     const loadBatches = async (reset: boolean = false) => {
+        const requestId = ++loadBatchesRequestIdRef.current;
+        console.log(`[Vitrine] 🔄 loadBatches chamado - requestId: ${requestId}, reset: ${reset}`);
+
+        const hadExistingBatches = batchesRef.current.length > 0;
+
+        // NÃO limpar batches aqui - aguardar resposta da API primeiro
         if (reset) {
             setPage(1);
-            setBatches([]);
             setHasMore(true);
+            if (hadExistingBatches) {
+                setIsRevalidating(true);
+            } else {
+                setLoading(true);
+            }
         }
-        
+
         console.log('Loading batches...', { page: reset ? 1 : page });
         try {
             const params: any = {};
@@ -101,52 +138,139 @@ export default function VitrineScreen() {
                 params.categoria = selectedCategory;
             }
 
-            if (location) {
+            const shouldUseLocation = Boolean(location && useLocationSearch);
+            const userRadiusKm = user?.radius_km ?? 5;
+            const baseRadiusKm = filterRadius ?? userRadiusKm;
+            const effectiveRadiusKm = filterRadius ?? autoRadiusKm ?? userRadiusKm;
+            const FALLBACK_RADIUS_KM = 20;
+
+            if (shouldUseLocation && location) {
                 params.lat = location.lat;
                 params.lng = location.lng;
                 // Usar raio do filtro se selecionado, senão usar o raio padrão do usuário
-                params.raio_km = filterRadius ?? user?.radius_km ?? 5;
+                params.raio_km = effectiveRadiusKm;
             }
 
-            // Add timeout to prevent infinite loading (10 segundos)
-            const fetchPromise = api.getPublicBatches(params);
-            const timeoutPromise = new Promise<Batch[]>((resolve) =>
-                setTimeout(() => {
-                    // Não logar como erro, apenas informação
-                    console.log('[Vitrine] Timeout ao buscar batches após 10s - retornando vazio');
-                    resolve([]);
-                }, 10000)
+            console.log('[Vitrine] 📡 Chamando API com params:', params);
+            const data = await api.getPublicBatches(params);
+            console.log(
+                `[Vitrine] ✅ API retornou ${data.length} batches - requestId: ${requestId}, currentRequestId: ${loadBatchesRequestIdRef.current}`
             );
 
-            const data = await Promise.race([fetchPromise, timeoutPromise]);
-            if (data.length > 0) {
-                console.log('[Vitrine] Batches loaded:', data.length);
+            // CRÍTICO: Verificar se esta requisição ainda é válida ANTES de atualizar o estado
+            if (requestId !== loadBatchesRequestIdRef.current) {
+                console.log(`[Vitrine] ⚠️ Requisição ${requestId} obsoleta, ignorando (atual: ${loadBatchesRequestIdRef.current})`);
+                return;
             }
-            
-            if (reset) {
-                setBatches(data);
+
+            let finalData = data;
+
+            if (shouldUseLocation && finalData.length === 0) {
+                const canAutoExpand =
+                    filterRadius === null &&
+                    autoRadiusKm === null &&
+                    baseRadiusKm < FALLBACK_RADIUS_KM;
+
+                if (canAutoExpand) {
+                    setLocationNotice(
+                        `Não há ofertas a ${baseRadiusKm}km. Tentando buscar em ${FALLBACK_RADIUS_KM}km...`
+                    );
+
+                    const fallbackParams = { ...params, raio_km: FALLBACK_RADIUS_KM };
+                    const fallbackData = await api.getPublicBatches(fallbackParams);
+
+                    if (requestId !== loadBatchesRequestIdRef.current) return;
+
+                    if (fallbackData.length > 0) {
+                        setAutoRadiusKm(FALLBACK_RADIUS_KM);
+                        setLocationNotice(
+                            `Sem ofertas a ${baseRadiusKm}km. Mostrando resultados em ${FALLBACK_RADIUS_KM}km.`
+                        );
+                        finalData = fallbackData;
+                    } else {
+                        setLocationNotice(
+                            `Nenhuma oferta encontrada em até ${FALLBACK_RADIUS_KM}km.`
+                        );
+                    }
+                } else if (autoRadiusKm) {
+                    setLocationNotice(`Nenhuma oferta encontrada em ${effectiveRadiusKm}km.`);
+                }
+
+                const canFallbackToOtherRegions =
+                    filterRadius === null && !locationToggledByUserRef.current;
+
+                if (finalData.length === 0 && canFallbackToOtherRegions) {
+                    const otherRegionsParams: any = { ...params };
+                    delete otherRegionsParams.lat;
+                    delete otherRegionsParams.lng;
+                    delete otherRegionsParams.raio_km;
+
+                    const otherRegionsData = await api.getPublicBatches(otherRegionsParams);
+
+                    if (requestId !== loadBatchesRequestIdRef.current) return;
+
+                    if (otherRegionsData.length > 0) {
+                        suppressNextLoadBatchesRef.current = true;
+                        setAutoRadiusKm(null);
+                        setUseLocationSearch(false);
+                        setLocationNotice(
+                            'Não há ofertas próximas. Mostrando ofertas de outras regiões.'
+                        );
+                        finalData = otherRegionsData;
+                    }
+                }
             } else {
-                setBatches(prev => [...prev, ...data]);
+                setLocationNotice(null);
             }
-            
+
+            if (finalData.length > 0) {
+                console.log('[Vitrine] Batches loaded:', finalData.length);
+                console.log(
+                    '[Vitrine] Primeiro batch:',
+                    JSON.stringify(finalData[0], null, 2)
+                );
+            }
+
+            // Só agora atualizar o estado, após garantir que a requisição é válida
+            if (reset) {
+                const shouldKeepPrevious =
+                    shouldUseLocation &&
+                    finalData.length === 0 &&
+                    !hasLoadedWithLocationRef.current &&
+                    hadExistingBatches;
+
+                if (!shouldKeepPrevious) {
+                    console.log(`[Vitrine] 💾 Salvando ${finalData.length} batches no estado (reset)`);
+                    setBatches(finalData);
+                }
+            } else {
+                console.log(`[Vitrine] 💾 Adicionando ${finalData.length} batches ao estado (append)`);
+                setBatches(prev => [...prev, ...finalData]);
+            }
+
             // Verificar se há mais itens para carregar
-            setHasMore(data.length >= ITEMS_PER_PAGE);
+            setHasMore(finalData.length >= ITEMS_PER_PAGE);
             setImageErrors(new Set()); // Reset image errors on new load
+
+            if (shouldUseLocation && finalData.length > 0) {
+                hasLoadedWithLocationRef.current = true;
+            }
         } catch (error: any) {
+            if (requestId !== loadBatchesRequestIdRef.current) return;
             // Não logar erros de rede como ERROR se já foram tratados no api.ts
-            const isNetworkError = error?.message?.includes('Network request failed') || 
+            const isNetworkError = error?.message?.includes('Network request failed') ||
                                  error?.message?.includes('Failed to fetch') ||
                                  error?.message?.includes('timeout');
             if (!isNetworkError) {
                 console.error('[Vitrine] Erro ao carregar batches:', error?.message || error);
             }
-            if (reset) {
-                setBatches([]);
-            }
+            // Não limpar a vitrine em caso de erro — mantém os dados antigos visíveis
         } finally {
+            if (requestId !== loadBatchesRequestIdRef.current) return;
             setLoading(false);
             setRefreshing(false);
             setLoadingMore(false);
+            setIsRevalidating(false);
         }
     };
 
@@ -163,30 +287,49 @@ export default function VitrineScreen() {
 
     // Filter batches based on search query and filters
     const filteredBatches = useMemo(() => {
+        console.log('[Vitrine] Iniciando filtro - Total de batches:', batches.length);
         let filtered = batches;
 
         // FILTRO PRINCIPAL: Remover produtos vencidos (não podem aparecer para o cliente)
         filtered = filtered.filter(batch => {
             const expirationDate = batch.expiration_date || batch.data_vencimento;
-            if (!expirationDate) return true; // Se não tem data, mantém (pode ser produto sem validade)
-            
+            console.log('[Vitrine] Verificando batch:', {
+                id: batch.id,
+                expirationDate,
+                hasExpiration: !!expirationDate
+            });
+
+            if (!expirationDate) {
+                console.log('[Vitrine] ✅ Batch sem data de vencimento - mantendo');
+                return true; // Se não tem data, mantém (pode ser produto sem validade)
+            }
+
             const expDate = new Date(expirationDate);
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             expDate.setHours(0, 0, 0, 0);
             const diffTime = expDate.getTime() - today.getTime();
             const daysToExpire = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            
+
+            console.log('[Vitrine] Cálculo de vencimento:', {
+                expDate: expDate.toISOString(),
+                today: today.toISOString(),
+                daysToExpire,
+                mantém: daysToExpire >= 0
+            });
+
             // Só mantém se não estiver vencido (daysToExpire >= 0)
             return daysToExpire >= 0;
         });
+
+        console.log('[Vitrine] Após filtro de vencimento:', filtered.length);
 
         // Filtro de busca por texto
         if (searchQuery.trim()) {
             const query = searchQuery.toLowerCase().trim();
             filtered = filtered.filter(batch => {
                 // Handle both PT-BR and EN field names
-                const productData = (batch as any).products || batch.product;
+                const productData = batch.products || batch.product;
                 const productName = (productData?.nome || productData?.name || '').toLowerCase();
                 const storeName = (batch.store?.nome || batch.store?.name || '').toLowerCase();
                 const category = (productData?.categoria || productData?.category || '').toLowerCase();
@@ -224,6 +367,16 @@ export default function VitrineScreen() {
         // Filtro de distância (raio) - aplicado no backend, mas podemos ordenar por distância aqui
         // O filtro de raio já é aplicado no loadBatches através do parâmetro raio_km
 
+        console.log('[Vitrine] ========== RESULTADO FINAL ==========');
+        console.log('[Vitrine] Total de batches retornados:', batches.length);
+        console.log('[Vitrine] Total após todos os filtros:', filtered.length);
+        console.log('[Vitrine] Filtros ativos:', {
+            searchQuery: !!searchQuery,
+            filterMinPrice: !!filterMinPrice,
+            filterMaxPrice: !!filterMaxPrice,
+            filterMaxDaysToExpire: filterMaxDaysToExpire !== null
+        });
+
         return filtered;
     }, [batches, searchQuery, filterMinPrice, filterMaxPrice, filterMaxDaysToExpire]);
 
@@ -240,12 +393,48 @@ export default function VitrineScreen() {
         });
     };
 
+    // Callbacks otimizados para FilterPanel (evitar re-renders)
+    const handleToggleFilters = useCallback(() => {
+        setShowFilters(prev => !prev);
+    }, []);
+
+    const handleMinPriceChange = useCallback((text: string) => {
+        const cleaned = text.replace(/[^\d,]/g, '').replace(/,/g, ',');
+        setFilterMinPrice(cleaned);
+    }, []);
+
+    const handleMaxPriceChange = useCallback((text: string) => {
+        const cleaned = text.replace(/[^\d,]/g, '').replace(/,/g, ',');
+        setFilterMaxPrice(cleaned);
+    }, []);
+
+    const handleDaysSelect = useCallback((days: number | null) => {
+        setFilterMaxDaysToExpire(days);
+    }, []);
+
+    const handleDistanceSelect = useCallback((km: number | null) => {
+        locationToggledByUserRef.current = true;
+        setLocationNotice(null);
+        setAutoRadiusKm(null);
+        setFilterRadius(km);
+        setUseLocationSearch(true);
+    }, []);
+
+    const handleClearFilters = useCallback(() => {
+        setFilterMinPrice('');
+        setFilterMaxPrice('');
+        setFilterMaxDaysToExpire(null);
+        setFilterRadius(null);
+        setLocationNotice(null);
+        setAutoRadiusKm(null);
+    }, []);
+
     const handleAddToCart = async (batch: Batch) => {
         const quantity = selectedQuantities[batch.id] || 1;
         const availableStock = batch.disponivel ?? batch.stock ?? batch.estoque_total ?? 0;
         
         if (quantity > availableStock) {
-            Alert.alert('Estoque insuficiente', `Apenas ${availableStock} unidade(s) disponível(eis).`);
+            showToast(`Estoque insuficiente: apenas ${availableStock} unidade(s).`, 'warning');
             return;
         }
         
@@ -262,9 +451,10 @@ export default function VitrineScreen() {
             const result = await api.addToCart(batch.id, quantity);
             const duration = Date.now() - startTime;
             console.log('[VitrineScreen] ✅ Produto adicionado com sucesso em', duration, 'ms');
+            const allItems = api.getAllCartItems(result);
             console.log('[VitrineScreen] Resultado:', {
-                hasItems: !!result?.items,
-                itemsCount: result?.items?.length || 0,
+                hasItems: allItems.length > 0,
+                itemsCount: allItems.length,
                 total: result?.total || 0
             });
             
@@ -272,11 +462,7 @@ export default function VitrineScreen() {
             updateCartCache(result);
             
             // Feedback visual de sucesso
-            Alert.alert(
-                '✅ Adicionado!',
-                'Produto adicionado ao carrinho. A quantidade foi incrementada se o produto já estava no carrinho.',
-                [{ text: 'OK' }]
-            );
+            showToast('Produto adicionado ao carrinho!', 'success');
         } catch (error: any) {
             // REVERTER atualização otimista em caso de erro
             incrementCartCount(-quantity);
@@ -294,10 +480,9 @@ export default function VitrineScreen() {
             
             if (isNetworkError) {
                 console.error('[VitrineScreen] ⚠️ Erro de rede/timeout detectado');
-                Alert.alert(
-                    '⚠️ Erro de Conexão',
-                    'Não foi possível conectar ao servidor. Verifique sua conexão com a internet e tente novamente.',
-                    [{ text: 'OK' }]
+                showToast(
+                    'Erro de conexão. Verifique sua internet e tente novamente.',
+                    'error'
                 );
                 return;
             }
@@ -336,17 +521,13 @@ export default function VitrineScreen() {
                                     console.log('[VitrineScreen] ✅ Carrinho substituído com sucesso');
                                     // Usar resposta diretamente para atualizar cache
                                     updateCartCache(result);
-                                    Alert.alert(
-                                        '✅ Adicionado!',
-                                        'Carrinho substituído e produto adicionado com sucesso!',
-                                        [{ text: 'OK' }]
-                                    );
+                                    showToast('Carrinho substituído e produto adicionado!', 'success');
                                 } catch (replaceError: any) {
                                     console.error('[VitrineScreen] Erro ao substituir carrinho:', replaceError);
-                                    Alert.alert(
-                                        'Erro',
-                                        replaceError?.message || 'Não foi possível substituir o carrinho. Tente novamente.'
-                                    );
+                                    handleError(replaceError, {
+                                        fallbackMessage:
+                                            'Não foi possível substituir o carrinho. Tente novamente.',
+                                    });
                                 }
                             }
                         },
@@ -363,10 +544,10 @@ export default function VitrineScreen() {
             console.error('[VitrineScreen] Status Code:', statusCode);
             console.error('[VitrineScreen] Stack:', error?.stack);
             
-            Alert.alert(
-                'Erro', 
-                errorMessage || 'Não foi possível adicionar ao carrinho. Tente novamente.'
-            );
+            handleError(error, {
+                fallbackMessage:
+                    errorMessage || 'Não foi possível adicionar ao carrinho. Tente novamente.',
+            });
         }
     };
 
@@ -506,28 +687,17 @@ export default function VitrineScreen() {
                 {/* Filtros - Usando FilterPanel Component */}
                 <FilterPanel
                     isOpen={showFilters}
-                    onToggle={() => setShowFilters(!showFilters)}
+                    onToggle={handleToggleFilters}
                     activeFiltersCount={[filterMinPrice, filterMaxPrice, filterMaxDaysToExpire, filterRadius].filter(Boolean).length}
                     minPrice={filterMinPrice}
                     maxPrice={filterMaxPrice}
-                    onMinPriceChange={(text) => {
-                        const cleaned = text.replace(/[^\d,]/g, '').replace(/,/g, ',');
-                        setFilterMinPrice(cleaned);
-                    }}
-                    onMaxPriceChange={(text) => {
-                        const cleaned = text.replace(/[^\d,]/g, '').replace(/,/g, ',');
-                        setFilterMaxPrice(cleaned);
-                    }}
+                    onMinPriceChange={handleMinPriceChange}
+                    onMaxPriceChange={handleMaxPriceChange}
                     selectedDays={filterMaxDaysToExpire}
-                    onDaysSelect={(days) => setFilterMaxDaysToExpire(days)}
+                    onDaysSelect={handleDaysSelect}
                     selectedDistance={filterRadius}
-                    onDistanceSelect={(km) => setFilterRadius(km)}
-                    onClear={() => {
-                        setFilterMinPrice('');
-                        setFilterMaxPrice('');
-                        setFilterMaxDaysToExpire(null);
-                        setFilterRadius(null);
-                    }}
+                    onDistanceSelect={handleDistanceSelect}
+                    onClear={handleClearFilters}
                     hasActiveFilters={hasActiveFilters}
                 />
 
@@ -536,8 +706,42 @@ export default function VitrineScreen() {
                     <View style={styles.locationInfo}>
                         <Ionicons name="location" size={14} color={Colors.primary} />
                         <Text style={styles.locationText}>
-                            Buscando em um raio de {user?.radius_km || 5}km
+                            {useLocationSearch
+                                ? `Buscando em um raio de ${filterRadius ?? autoRadiusKm ?? user?.radius_km ?? 5}km`
+                                : 'Mostrando ofertas de outras regiões'}
                         </Text>
+                        <TouchableOpacity
+                            onPress={() => {
+                                locationToggledByUserRef.current = true;
+                                setLocationNotice(null);
+                                setAutoRadiusKm(null);
+                                setUseLocationSearch((prev) => !prev);
+                            }}
+                            accessibilityRole="button"
+                            accessibilityLabel={
+                                useLocationSearch
+                                    ? 'Ver ofertas de outras regiões'
+                                    : 'Usar minha localização'
+                            }
+                        >
+                            <Text style={styles.locationActionText}>
+                                {useLocationSearch ? 'Outras regiões' : 'Usar localização'}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+
+                {locationNotice && (
+                    <View style={styles.locationNotice}>
+                        <Ionicons name="information-circle" size={16} color={Colors.primary} />
+                        <Text style={styles.locationNoticeText}>{locationNotice}</Text>
+                    </View>
+                )}
+
+                {isRevalidating && batches.length > 0 && (
+                    <View style={styles.revalidatingBanner}>
+                        <ActivityIndicator size="small" color={Colors.primary} />
+                        <Text style={styles.revalidatingText}>Atualizando ofertas…</Text>
                     </View>
                 )}
 
@@ -581,13 +785,42 @@ export default function VitrineScreen() {
                                 ? `Não encontramos produtos para "${searchQuery}"`
                                 : selectedCategory
                                     ? 'Tente outra categoria ou aumente o raio de busca'
-                                    : 'Não há ofertas disponíveis na sua região ainda'
+                                    : useLocationSearch && location
+                                        ? 'Não encontramos ofertas próximas. Você pode aumentar o raio ou ver ofertas de outras regiões.'
+                                        : 'Não há ofertas disponíveis no momento'
                         }
-                        actionLabel={searchQuery ? undefined : "Ajustar Localização"}
-                        onAction={searchQuery ? undefined : () => router.push('/(customer)/setup')}
+                        actionLabel={
+                            !searchQuery && useLocationSearch && location
+                                ? 'Ver ofertas de outras regiões'
+                                : searchQuery
+                                    ? undefined
+                                    : 'Ajustar Localização'
+                        }
+                        onAction={
+                            !searchQuery && useLocationSearch && location
+                                ? () => {
+                                    locationToggledByUserRef.current = true;
+                                    setLocationNotice(null);
+                                    setAutoRadiusKm(null);
+                                    setUseLocationSearch(false);
+                                }
+                                : searchQuery
+                                    ? undefined
+                                    : () => router.push('/(customer)/setup')
+                        }
+                        secondaryActionLabel={
+                            !searchQuery && useLocationSearch && location
+                                ? 'Ajustar Localização'
+                                : undefined
+                        }
+                        onSecondaryAction={
+                            !searchQuery && useLocationSearch && location
+                                ? () => router.push('/(customer)/setup')
+                                : undefined
+                        }
                     />
                 ) : (
-                    <View style={styles.productsWrapper}>
+                    <View style={[styles.productsWrapper, isRevalidating && styles.productsWrapperUpdating]}>
                         {searchQuery && (
                             <Text style={styles.searchResultsText}>
                                 {filteredBatches.length} resultado(s) para &quot;{searchQuery}&quot;
@@ -674,6 +907,54 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '500',
         color: Colors.primary,
+        flex: 1,
+    },
+    locationActionText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: Colors.primary,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+    },
+    locationNotice: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        paddingHorizontal: DesignTokens.padding.medium,
+        paddingVertical: 10,
+        marginHorizontal: DesignTokens.padding.medium,
+        marginBottom: DesignTokens.spacing.sm,
+        backgroundColor: Colors.glass,
+        borderRadius: DesignTokens.borderRadius.md,
+        borderWidth: 1,
+        borderColor: Colors.glassBorder,
+    },
+    locationNoticeText: {
+        flex: 1,
+        fontSize: 12,
+        color: Colors.textSecondary,
+        lineHeight: 16,
+    },
+    revalidatingBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        paddingHorizontal: DesignTokens.padding.medium,
+        paddingVertical: 10,
+        marginHorizontal: DesignTokens.padding.medium,
+        marginBottom: DesignTokens.spacing.sm,
+        backgroundColor: Colors.primary05,
+        borderRadius: DesignTokens.borderRadius.md,
+        borderWidth: 1,
+        borderColor: Colors.primary15,
+    },
+    revalidatingText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: Colors.primary,
+    },
+    productsWrapperUpdating: {
+        opacity: 0.7,
     },
     categoriesWrapper: {
         marginBottom: DesignTokens.spacing.md,

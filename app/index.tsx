@@ -4,7 +4,12 @@ import { API_BASE_URL } from '@/constants/config';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/services/api';
 import { getSession, supabase } from '@/services/supabase';
-import { getGlobalRedirectInProgress, setGlobalRedirectInProgress } from '@/utils/redirectLock';
+import {
+    getGlobalRedirectInProgress,
+    releaseAuthSessionLock,
+    setGlobalRedirectInProgress,
+    tryAcquireAuthSessionLock,
+} from '@/utils/redirectLock';
 import { Ionicons } from '@expo/vector-icons';
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
@@ -234,6 +239,35 @@ export default function LoginScreen() {
 
     const handleGoogleLogin = async () => {
         setLoading(true);
+        const authLockOwner = 'login-screen';
+        const acquiredAuthLock = tryAcquireAuthSessionLock(authLockOwner);
+
+        const waitForSession = async (timeoutMs: number) => {
+            const startedAt = Date.now();
+            while (Date.now() - startedAt < timeoutMs) {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (session) return session;
+                await new Promise((resolve) => setTimeout(resolve, 250));
+            }
+            return null;
+        };
+
+        if (!acquiredAuthLock) {
+            try {
+                console.log('[LoginScreen] Auth lock ativo - aguardando sessão (provável deep link simultâneo)...');
+                const session = await waitForSession(5000);
+                if (session) {
+                    console.log('[LoginScreen] Sessão apareceu enquanto aguardava lock - redirecionando...');
+                    await redirectToApp();
+                    return;
+                }
+                console.log('[LoginScreen] Sessão não apareceu - permitindo tentativa de login novamente');
+            } finally {
+                setLoading(false);
+            }
+            return;
+        }
+
         try {
             const redirectUrl = Linking.createURL('auth/callback');
             console.log('Redirect URL:', redirectUrl);
@@ -284,6 +318,15 @@ export default function LoginScreen() {
                             console.log('[LoginScreen] Processando tokens diretamente...');
 
                             try {
+                                // If another handler already set a session, avoid consuming the refresh token again
+                                const { data: { session: existingSession } } = await supabase.auth.getSession();
+                                if (existingSession) {
+                                    console.log('[LoginScreen] Sessão já existe - pulando setSession e redirecionando...');
+                                    await redirectToApp();
+                                    setLoading(false);
+                                    return;
+                                }
+
                                 // Set session first
                                 console.log('[LoginScreen] Chamando supabase.auth.setSession()...');
                                 console.log('[LoginScreen] Tokens preparados - accessToken length:', accessToken.length, 'refreshToken length:', refreshToken.length);
@@ -309,6 +352,22 @@ export default function LoginScreen() {
                                 const { data: sessionData, error: sessionError } = setSessionResult;
                                 
                                 if (sessionError) {
+                                    const message = sessionError?.message || '';
+                                    const isInvalidRefreshToken =
+                                        message.includes('Invalid Refresh Token') ||
+                                        message.includes('Refresh Token Not Found');
+
+                                    if (isInvalidRefreshToken) {
+                                        console.warn('[LoginScreen] Refresh token já foi consumido por outro handler, verificando sessão...');
+                                        const { data: { session: recoveredSession } } = await supabase.auth.getSession();
+                                        if (recoveredSession) {
+                                            console.log('[LoginScreen] Sessão recuperada após erro - redirecionando...');
+                                            await redirectToApp();
+                                            setLoading(false);
+                                            return;
+                                        }
+                                    }
+
                                     console.error('[LoginScreen] ERRO ao configurar sessão:', sessionError);
                                     Alert.alert('Erro', `Não foi possível configurar a sessão: ${sessionError.message}`);
                                     isProcessingLoginRef.current = false;
@@ -383,6 +442,9 @@ export default function LoginScreen() {
             console.error('Login error:', error);
             Alert.alert('Erro', error.message || 'Não foi possível fazer login. Tente novamente.');
         } finally {
+            if (acquiredAuthLock) {
+                releaseAuthSessionLock(authLockOwner);
+            }
             setLoading(false);
         }
     };

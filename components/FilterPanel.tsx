@@ -47,7 +47,7 @@ interface FilterPanelProps {
     hasActiveFilters?: boolean;
 }
 
-export const FilterPanel: React.FC<FilterPanelProps> = ({
+export const FilterPanel: React.FC<FilterPanelProps> = React.memo(({
     isOpen,
     onToggle,
     activeFiltersCount = 0,
@@ -64,30 +64,43 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
     onClear,
     hasActiveFilters = false,
 }) => {
-    const height = useSharedValue(0);
-    const opacity = useSharedValue(0);
+    const height = useSharedValue(isOpen ? 1 : 0);
+    const opacity = useSharedValue(isOpen ? 1 : 0);
+    const [shouldRender, setShouldRender] = React.useState(isOpen);
 
     React.useEffect(() => {
         if (isOpen) {
+            // Renderizar imediatamente quando abrindo
+            setShouldRender(true);
+            // Animar entrada
             height.value = withSpring(1, {
-                damping: 15,
-                stiffness: 150,
+                damping: 20,
+                stiffness: 200,
             });
-            opacity.value = withTiming(1, { duration: DesignTokens.animations.normal });
+            opacity.value = withTiming(1, { duration: 200 });
         } else {
-            height.value = withTiming(0, { duration: DesignTokens.animations.normal });
-            opacity.value = withTiming(0, { duration: DesignTokens.animations.fast });
+            // Animar saída
+            height.value = withTiming(0, { duration: 150 });
+            opacity.value = withTiming(0, { duration: 100 });
+            // Remover do DOM após animação
+            const timeout = setTimeout(() => setShouldRender(false), 150);
+            return () => clearTimeout(timeout);
         }
     }, [isOpen]);
 
     const animatedStyle = useAnimatedStyle(() => ({
         maxHeight: height.value === 1 ? 1000 : 0,
         opacity: opacity.value,
-    }));
+    }), []);
 
     const contentAnimatedStyle = useAnimatedStyle(() => ({
-        transform: [{ translateY: (1 - height.value) * -20 }],
-    }));
+        transform: [{ translateY: (1 - height.value) * -15 }],
+    }), []);
+
+    // Não renderizar se não deveria estar visível (otimização)
+    if (!shouldRender) {
+        return null;
+    }
 
     return (
         <Animated.View style={[styles.container, animatedStyle]}>
@@ -195,7 +208,9 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
             </Animated.View>
         </Animated.View>
     );
-};
+});
+
+FilterPanel.displayName = 'FilterPanel';
 
 const styles = StyleSheet.create({
     container: {

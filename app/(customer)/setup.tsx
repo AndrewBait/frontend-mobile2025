@@ -1,7 +1,9 @@
 import { GradientBackground } from '@/components/GradientBackground';
+import { useToast } from '@/components/feedback/Toast';
 import { Colors } from '@/constants/Colors';
 import { DesignTokens } from '@/constants/designTokens';
 import { useAuth } from '@/contexts/AuthContext';
+import { useErrorHandler } from '@/hooks/useErrorHandler';
 import { api } from '@/services/api';
 import {
     DEFAULT_PICKUP_RADIUS,
@@ -19,10 +21,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -45,6 +46,8 @@ export default function CustomerSetupScreen() {
     const screenPaddingTop = insets.top + DesignTokens.spacing.md;
     const { pendingRole } = useLocalSearchParams<{ pendingRole?: string }>();
     const { user, refreshUser } = useAuth();
+    const { showToast } = useToast();
+    const { handleError } = useErrorHandler();
     const [loading, setLoading] = useState(false);
     const [loadingLocation, setLoadingLocation] = useState(false);
     const [loadingCEP, setLoadingCEP] = useState(false);
@@ -64,19 +67,14 @@ export default function CustomerSetupScreen() {
     const [locationGranted, setLocationGranted] = useState(false);
     const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
 
-    useEffect(() => {
-        loadExistingData();
-        requestLocation();
-    }, [user]);
-
-    const loadExistingData = async () => {
+    const loadExistingData = useCallback(async () => {
         if (!user) return;
-        
+
         try {
             // Carregar perfil completo (inclui customer com CPF)
             const profile = await api.getProfile();
             if (profile.phone) setPhone(formatPhone(profile.phone));
-            
+
             // Carregar CPF do customer se existir
             if (profile.customer?.cpf) {
                 setCpf(formatCPF(profile.customer.cpf));
@@ -84,9 +82,9 @@ export default function CustomerSetupScreen() {
         } catch (error) {
             console.error('Error loading profile:', error);
         }
-    };
+    }, [user]);
 
-    const requestLocation = async () => {
+    const requestLocation = useCallback(async () => {
         setLoadingLocation(true);
         try {
             const { status } = await Location.requestForegroundPermissionsAsync();
@@ -118,9 +116,14 @@ export default function CustomerSetupScreen() {
         } finally {
             setLoadingLocation(false);
         }
-    };
+    }, []);
 
-    const handleCEPChange = async (value: string) => {
+    useEffect(() => {
+        loadExistingData();
+        requestLocation();
+    }, [loadExistingData, requestLocation]);
+
+    const handleCEPChange = useCallback(async (value: string) => {
         const formatted = formatCEP(value);
         setCep(formatted);
 
@@ -140,9 +143,9 @@ export default function CustomerSetupScreen() {
                 setErrors(prev => ({ ...prev, cep: 'CEP não encontrado' }));
             }
         }
-    };
+    }, []);
 
-    const validateForm = (): boolean => {
+    const validateForm = useCallback((): boolean => {
         const newErrors: FormErrors = {};
 
         if (!validateRequired(phone)) {
@@ -164,11 +167,11 @@ export default function CustomerSetupScreen() {
 
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
-    };
+    }, [phone, cpf, cep]);
 
-    const handleSubmit = async () => {
+    const handleSubmit = useCallback(async () => {
         if (!validateForm()) {
-            Alert.alert('Erro', 'Por favor, corrija os campos destacados.');
+            showToast('Por favor, corrija os campos destacados.', 'warning');
             return;
         }
 
@@ -197,18 +200,20 @@ export default function CustomerSetupScreen() {
 
             await refreshUser();
 
-            Alert.alert(
-                '✅ Cadastro Completo!',
-                'Suas informações foram salvas. Bem-vindo ao VenceJá!',
-                [{ text: 'Continuar', onPress: () => router.replace('/(customer)') }]
-            );
+            showToast('Cadastro completo! Bem-vindo ao VenceJá.', 'success');
+            router.replace('/(customer)');
         } catch (error: any) {
             console.error('Error saving profile:', error);
-            Alert.alert('Erro', error.message || 'Não foi possível salvar. Tente novamente.');
+            handleError(error, { fallbackMessage: 'Não foi possível salvar. Tente novamente.' });
         } finally {
             setLoading(false);
         }
-    };
+    }, [validateForm, pendingRole, phone, cpf, coords, radius, refreshUser, handleError, showToast]);
+
+    // Validar se formulário tem erros críticos (phone e cpf vazios)
+    const hasRequiredFields = useMemo(() => {
+        return validateRequired(phone) && validateRequired(cpf);
+    }, [phone, cpf]);
 
     return (
         <GradientBackground>
@@ -305,7 +310,7 @@ export default function CustomerSetupScreen() {
                         <TextInput
                             style={[styles.input, errors.phone && styles.inputError]}
                             value={phone}
-                            onChangeText={(v) => setPhone(formatPhone(v))}
+                            onChangeText={useCallback((v: string) => setPhone(formatPhone(v)), [])}
                             placeholder="(00) 00000-0000"
                             placeholderTextColor={Colors.textMuted}
                             keyboardType="phone-pad"
@@ -321,7 +326,7 @@ export default function CustomerSetupScreen() {
                         <TextInput
                             style={[styles.input, errors.cpf && styles.inputError]}
                             value={cpf}
-                            onChangeText={(v) => setCpf(formatCPF(v))}
+                            onChangeText={useCallback((v: string) => setCpf(formatCPF(v)), [])}
                             placeholder="000.000.000-00"
                             placeholderTextColor={Colors.textMuted}
                             keyboardType="numeric"
@@ -441,12 +446,12 @@ export default function CustomerSetupScreen() {
                     {/* Submit */}
                     <TouchableOpacity
                         onPress={handleSubmit}
-                        disabled={loading}
+                        disabled={loading || !hasRequiredFields}
                         activeOpacity={0.8}
-                        style={styles.submitButton}
+                        style={[styles.submitButton, (!hasRequiredFields && !loading) && styles.submitButtonDisabled]}
                     >
                         <LinearGradient
-                            colors={[Colors.primary, Colors.primaryDark]}
+                            colors={hasRequiredFields ? [Colors.primary, Colors.primaryDark] : [Colors.surfaceMuted, Colors.surfaceMuted]}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 0 }}
                             style={styles.submitGradient}
@@ -455,8 +460,8 @@ export default function CustomerSetupScreen() {
                                 <ActivityIndicator color={Colors.text} />
                             ) : (
                                 <>
-                                    <Ionicons name="checkmark-circle" size={20} color={Colors.text} />
-                                    <Text style={styles.submitText}>Salvar Perfil</Text>
+                                    <Ionicons name="checkmark-circle" size={20} color={hasRequiredFields ? Colors.text : Colors.textMuted} />
+                                    <Text style={[styles.submitText, !hasRequiredFields && styles.submitTextDisabled]}>Salvar Perfil</Text>
                                 </>
                             )}
                         </LinearGradient>
@@ -651,6 +656,9 @@ const styles = StyleSheet.create({
         borderRadius: 14,
         overflow: 'hidden',
     },
+    submitButtonDisabled: {
+        opacity: 0.6,
+    },
     submitGradient: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -662,5 +670,8 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
         color: Colors.text,
+    },
+    submitTextDisabled: {
+        color: Colors.textMuted,
     },
 });

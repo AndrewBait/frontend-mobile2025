@@ -3,8 +3,10 @@ import { Button } from '@/components/base/Button';
 import { GradientBackground } from '@/components/GradientBackground';
 import { Colors } from '@/constants/Colors';
 import { DesignTokens } from '@/constants/designTokens';
+import { useAuth } from '@/contexts/AuthContext';
 import { useCart } from '@/contexts/CartContext';
-import { api, Batch } from '@/services/api';
+import { api, Batch, Favorite } from '@/services/api';
+import { getOptimizedSupabaseImageUrl } from '@/utils/images';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
@@ -21,16 +23,91 @@ import {
     View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 export default function ProductDetailScreen() {
     const insets = useSafeAreaInsets();
     const headerTop = insets.top + DesignTokens.spacing.md;
     const { id } = useLocalSearchParams<{ id: string }>();
     const { incrementCartCount, updateCartCache } = useCart();
+    const { session, user } = useAuth();
+    const queryClient = useQueryClient();
     const [batch, setBatch] = useState<Batch | null>(null);
     const [loading, setLoading] = useState(true);
-    const [isFavorite, setIsFavorite] = useState(false);
+    const [optimisticIsFavorite, setOptimisticIsFavorite] = useState<boolean | null>(null);
     const [quantity, setQuantity] = useState(1);
+
+    const favoritesEnabled = Boolean(session && user && user.role === 'customer' && id);
+
+    const favoritesQuery = useQuery({
+        queryKey: ['favorites'],
+        queryFn: () => api.getFavorites(),
+        enabled: favoritesEnabled,
+        staleTime: 30000,
+    });
+
+    const favoriteRecord: Favorite | undefined = (favoritesQuery.data || []).find(
+        (f) => f.product_batch_id === id
+    );
+    const isFavoriteFromServer = Boolean(favoriteRecord);
+    const isFavorite = optimisticIsFavorite ?? isFavoriteFromServer;
+
+    const toggleFavoriteMutation = useMutation({
+        mutationFn: async () => {
+            if (!id) return;
+            if (isFavoriteFromServer) {
+                await api.removeFavoriteByBatch(id);
+                return;
+            }
+            await api.addFavorite(id);
+        },
+        onMutate: async () => {
+            if (!id) return;
+
+            await queryClient.cancelQueries({ queryKey: ['favorites'] });
+            const previous = queryClient.getQueryData<Favorite[]>(['favorites']) || [];
+
+            const currentIsFavorite = optimisticIsFavorite ?? isFavoriteFromServer;
+            const nextIsFavorite = !currentIsFavorite;
+
+            if (nextIsFavorite) {
+                if (!batch) {
+                    setOptimisticIsFavorite(nextIsFavorite);
+                    return { previous };
+                }
+
+                const optimisticFavorite: Favorite = {
+                    id: `optimistic-${id}`,
+                    product_batch_id: id,
+                    created_at: new Date().toISOString(),
+                    product_batches: batch,
+                };
+
+                queryClient.setQueryData<Favorite[]>(['favorites'], [
+                    optimisticFavorite,
+                    ...previous.filter((f) => f.product_batch_id !== id),
+                ]);
+            } else {
+                queryClient.setQueryData<Favorite[]>(
+                    ['favorites'],
+                    previous.filter((f) => f.product_batch_id !== id)
+                );
+            }
+
+            setOptimisticIsFavorite(nextIsFavorite);
+            return { previous };
+        },
+        onError: (_err, _vars, context) => {
+            if (context?.previous) {
+                queryClient.setQueryData(['favorites'], context.previous);
+            }
+            setOptimisticIsFavorite(null);
+        },
+        onSettled: () => {
+            setOptimisticIsFavorite(null);
+            queryClient.invalidateQueries({ queryKey: ['favorites'] });
+        },
+    });
 
     useEffect(() => {
         if (id) {
@@ -53,12 +130,8 @@ export default function ProductDetailScreen() {
 
     const handleToggleFavorite = async () => {
         try {
-            if (isFavorite) {
-                await api.removeFavorite(id!);
-            } else {
-                await api.addFavorite(id!);
-            }
-            setIsFavorite(!isFavorite);
+            if (!favoritesEnabled) return;
+            await toggleFavoriteMutation.mutateAsync();
         } catch (error) {
             console.error('Error toggling favorite:', error);
         }
@@ -78,10 +151,7 @@ export default function ProductDetailScreen() {
             updateCartCache(result);
             
             // Buscar quantidade atualizada do carrinho da resposta
-            const cartItem = result.items?.find(item => {
-                const itemBatchId = item.batch_id || (item as any).product_batch_id;
-                return itemBatchId === id;
-            });
+            const cartItem = api.findCartItem(result, id!);
             const totalInCart = cartItem?.quantity || quantity;
             
             // Success haptic
@@ -153,10 +223,7 @@ export default function ProductDetailScreen() {
                                     updateCartCache(result);
                                     
                                     // Buscar quantidade atualizada do carrinho da resposta
-                                    const cartItem = result.items?.find(item => {
-                                        const itemBatchId = item.batch_id || (item as any).product_batch_id;
-                                        return itemBatchId === id;
-                                    });
+                                    const cartItem = api.findCartItem(result, id!);
                                     const totalInCart = cartItem?.quantity || quantity;
                                     
                                     Alert.alert(
@@ -190,7 +257,7 @@ export default function ProductDetailScreen() {
     const handleShare = async () => {
         try {
             // Handle both PT-BR and EN field names
-            const productData = (batch as any)?.products || batch?.product;
+            const productData = batch?.products || batch?.product;
             const productName = productData?.nome || productData?.name || 'Produto';
             const promoPrice = batch?.promo_price ?? batch?.preco_promocional ?? 0;
             const discountPercent = batch?.discount_percent ?? batch?.desconto_percentual ?? 0;
@@ -214,7 +281,16 @@ export default function ProductDetailScreen() {
     }
 
     // Handle both PT-BR and EN field names
-    const productData = (batch as any).products || batch.product;
+    const productData = batch.products || batch.product;
+    const categoryLabel = productData?.categoria || productData?.category;
+    const heroImage =
+        getOptimizedSupabaseImageUrl(productData?.foto1 || productData?.photo1, {
+            width: 800,
+            quality: 80,
+        }) ||
+        productData?.foto1 ||
+        productData?.photo1 ||
+        'https://via.placeholder.com/300';
     const originalPrice = batch.original_price ?? batch.preco_normal_override ?? productData?.preco_normal ?? 0;
     const promoPrice = batch.promo_price ?? batch.preco_promocional ?? 0;
     const discountPercent = batch.discount_percent ?? batch.desconto_percentual ?? 0;
@@ -259,7 +335,7 @@ export default function ProductDetailScreen() {
                     {/* Image */}
                     <View style={styles.imageContainer}>
                         <Image
-                            source={{ uri: productData?.foto1 || productData?.photo1 || 'https://via.placeholder.com/300' }}
+                            source={{ uri: heroImage }}
                             style={styles.productImage}
                             contentFit="cover"
                             transition={200}
@@ -289,9 +365,9 @@ export default function ProductDetailScreen() {
                         <Text style={styles.productName}>{productData?.nome || productData?.name}</Text>
 
                         {/* Category */}
-                        {(productData?.categoria || productData?.category) && (
+                        {categoryLabel && (
                             <Badge
-                                label={productData?.categoria || productData?.category}
+                                label={categoryLabel}
                                 variant="primary"
                                 size="md"
                                 style={styles.categoryBadge}
@@ -472,7 +548,6 @@ const styles = StyleSheet.create({
         paddingHorizontal: DesignTokens.spacing.md,
         backgroundColor: '#F9FAFB', // Gray-50
         borderRadius: DesignTokens.borderRadius.md,
-        marginBottom: DesignTokens.spacing.md,
     },
     storeIconContainer: {
         width: 32,

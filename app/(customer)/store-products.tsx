@@ -1,10 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    FlatList,
     Image,
     RefreshControl,
     ScrollView,
@@ -15,11 +14,13 @@ import {
     View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AdaptiveList } from '@/components/base/AdaptiveList';
 import { GradientBackground } from '@/components/GradientBackground';
 import { Colors } from '@/constants/Colors';
 import { DesignTokens } from '@/constants/designTokens';
 import { useAuth } from '@/contexts/AuthContext';
 import { api, Batch, Store } from '@/services/api';
+import { getOptimizedSupabaseImageUrl } from '@/utils/images';
 
 export default function StoreProductsScreen() {
     const { storeId } = useLocalSearchParams<{ storeId?: string }>();
@@ -42,6 +43,8 @@ export default function StoreProductsScreen() {
     const [filterStoreType, setFilterStoreType] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
+    const loadStoresListRequestIdRef = useRef(0);
+    const loadStoreDataRequestIdRef = useRef(0);
     
     // Paginação
     const [page, setPage] = useState(1);
@@ -90,6 +93,8 @@ export default function StoreProductsScreen() {
 
         if (loadingMore && !reset) return; // Evitar múltiplas chamadas simultâneas
 
+        const requestId = ++loadStoresListRequestIdRef.current;
+
         try {
             if (reset) {
                 setLoading(true);
@@ -110,16 +115,8 @@ export default function StoreProductsScreen() {
                 params.raio_km = filterRadius ?? user?.radius_km ?? 5;
             }
 
-            // Buscar batches públicos com filtros
-            const fetchPromise = api.getPublicBatches(params);
-            const timeoutPromise = new Promise<Batch[]>((resolve) =>
-                setTimeout(() => {
-                    console.log('[StoreProducts] Timeout ao buscar lojas após 10s');
-                    resolve([]);
-                }, 10000)
-            );
-
-            const batchesData = await Promise.race([fetchPromise, timeoutPromise]);
+            const batchesData = await api.getPublicBatches(params);
+            if (requestId !== loadStoresListRequestIdRef.current) return;
             const uniqueStores = new Map<string, Store>();
             
             if (batchesData && batchesData.length > 0) {
@@ -153,6 +150,7 @@ export default function StoreProductsScreen() {
                 setHasMore(false);
             }
         } catch (error: any) {
+            if (requestId !== loadStoresListRequestIdRef.current) return;
             const isNetworkError = error?.message?.includes('Network request failed') || 
                                  error?.message?.includes('Failed to fetch');
             if (!isNetworkError) {
@@ -163,6 +161,7 @@ export default function StoreProductsScreen() {
             }
             setHasMore(false);
         } finally {
+            if (requestId !== loadStoresListRequestIdRef.current) return;
             setLoading(false);
             setLoadingMore(false);
             setRefreshing(false);
@@ -229,39 +228,30 @@ export default function StoreProductsScreen() {
     }, [allStores]);
 
     const loadStoreData = async () => {
+        const requestId = ++loadStoreDataRequestIdRef.current;
         try {
             setLoading(true);
             
-            // Carregar dados da loja com timeout
-            const storePromise = api.getPublicStore(storeId!);
-            const storeTimeout = new Promise<any>((resolve) =>
-                setTimeout(() => {
-                    console.log('[StoreProducts] Timeout ao buscar dados da loja após 8s');
-                    resolve(null);
-                }, 8000)
-            );
-            const storeData = await Promise.race([storePromise, storeTimeout]);
-            
-            if (storeData) {
-                setStore(storeData);
+            const [storeResult, batchesResult] = await Promise.allSettled([
+                api.getPublicStore(storeId!),
+                api.getPublicBatches({ store_id: storeId }),
+            ]);
+
+            if (requestId !== loadStoreDataRequestIdRef.current) return;
+
+            if (storeResult.status === 'fulfilled') {
+                setStore(storeResult.value);
+            } else if (!store) {
+                setStore(null);
             }
-            
-            // Carregar batches da loja com timeout
-            const batchesPromise = api.getPublicBatches({ store_id: storeId });
-            const batchesTimeout = new Promise<Batch[]>((resolve) =>
-                setTimeout(() => {
-                    console.log('[StoreProducts] Timeout ao buscar batches após 10s');
-                    resolve([]);
-                }, 10000)
-            );
-            const batchesData = await Promise.race([batchesPromise, batchesTimeout]);
-            
-            if (batchesData) {
-                setBatches(batchesData);
+
+            if (batchesResult.status === 'fulfilled') {
+                setBatches(batchesResult.value || []);
             } else {
                 setBatches([]);
             }
         } catch (error: any) {
+            if (requestId !== loadStoreDataRequestIdRef.current) return;
             // Não logar erros de rede como ERROR se já foram tratados
             const isNetworkError = error?.message?.includes('Network request failed') || 
                                  error?.message?.includes('Failed to fetch');
@@ -274,11 +264,15 @@ export default function StoreProductsScreen() {
             }
             setBatches([]);
         } finally {
+            if (requestId !== loadStoreDataRequestIdRef.current) return;
             setLoading(false);
         }
     };
 
     const renderStore = ({ item }: { item: Store }) => {
+        const logoUri =
+            getOptimizedSupabaseImageUrl(item.logo_url, { width: 200, quality: 80 }) || item.logo_url;
+
         return (
             <TouchableOpacity
                 style={styles.storeCard}
@@ -292,7 +286,7 @@ export default function StoreProductsScreen() {
             >
                 {item.logo_url && (
                     <Image
-                        source={{ uri: item.logo_url }}
+                        source={{ uri: logoUri }}
                         style={styles.storeCardLogo}
                         resizeMode="cover"
                     />
@@ -323,9 +317,11 @@ export default function StoreProductsScreen() {
     const renderBatch = ({ item }: { item: Batch }) => {
         // Handle both PT-BR and EN field names - backend may return products (plural) or product (singular)
         // O mapBatchFields já mapeou, mas ainda pode ter products (plural) do backend
-        const productData = (item as any).products || item.product;
+        const productData = item.products || item.product;
         const productName = productData?.name || productData?.nome || 'Produto sem nome';
         const productPhoto = productData?.photo1 || productData?.foto1 || null;
+        const productPhotoUri =
+            getOptimizedSupabaseImageUrl(productPhoto, { width: 400, quality: 80 }) || productPhoto;
         const productCategory = productData?.category || productData?.categoria || '';
         const originalPrice = item.original_price ?? item.preco_normal_override ?? productData?.preco_normal ?? 0;
         const promoPrice = item.promo_price ?? item.preco_promocional ?? 0;
@@ -367,9 +363,9 @@ export default function StoreProductsScreen() {
                 activeOpacity={0.9}
             >
                 <View style={styles.batchImageContainer}>
-                    {productPhoto ? (
+                    {productPhotoUri ? (
                         <Image
-                            source={{ uri: productPhoto }}
+                            source={{ uri: productPhotoUri }}
                             style={styles.batchImage}
                             resizeMode="cover"
                         />
@@ -644,12 +640,13 @@ export default function StoreProductsScreen() {
                                     {paginatedStores.length < filteredStores.length && ` (mostrando ${paginatedStores.length})`}
                                 </Text>
                             )}
-                            <FlatList
+                            <AdaptiveList
                                 data={paginatedStores}
                                 renderItem={renderStore}
                                 keyExtractor={(item) => item.id}
                                 contentContainerStyle={styles.storesList}
                                 showsVerticalScrollIndicator={false}
+                                estimatedItemSize={120}
                                 refreshControl={
                                     <RefreshControl
                                         refreshing={refreshing}
@@ -701,6 +698,9 @@ export default function StoreProductsScreen() {
         );
     }
 
+    const storeLogoUri =
+        getOptimizedSupabaseImageUrl(store.logo_url, { width: 300, quality: 80 }) || store.logo_url;
+
     return (
         <GradientBackground>
             <View style={containerStyle}>
@@ -721,7 +721,7 @@ export default function StoreProductsScreen() {
                 <View style={styles.storeHeader}>
                     {store.logo_url ? (
                         <Image
-                            source={{ uri: store.logo_url }}
+                            source={{ uri: storeLogoUri }}
                             style={styles.storeLogo}
                             resizeMode="cover"
                         />
@@ -781,7 +781,7 @@ export default function StoreProductsScreen() {
                         <Text style={styles.productsTitle}>
                             {batches.length} produto(s) disponível(eis)
                         </Text>
-                        <FlatList
+                        <AdaptiveList
                             data={batches}
                             renderItem={renderBatch}
                             keyExtractor={(item) => item.id}
@@ -789,6 +789,7 @@ export default function StoreProductsScreen() {
                             columnWrapperStyle={styles.row}
                             contentContainerStyle={styles.productsList}
                             showsVerticalScrollIndicator={false}
+                            estimatedItemSize={260}
                         />
                     </View>
                 )}

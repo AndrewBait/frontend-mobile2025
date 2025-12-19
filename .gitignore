@@ -33,6 +33,9 @@ yarn-error.*
 # local env files
 .env*.local
 
+# MCP (tokens/config locais)
+.mcp.json
+
 # local dumps/scripts (não versionar)
 *_code_full.txt
 get_rn_code.sh

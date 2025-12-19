@@ -69,8 +69,19 @@ export const getSession = async () => {
 
 export const refreshAccessToken = async (): Promise<string | null> => {
     try {
+        const session: any = await getSession();
+        if (!session?.refresh_token) return null;
+
         const { data, error } = await supabase.auth.refreshSession();
-        if (error) return null;
+        if (error) {
+            if (
+                typeof error.message === 'string' &&
+                error.message.includes('Refresh Token Not Found')
+            ) {
+                await supabase.auth.signOut({ scope: 'local' });
+            }
+            return null;
+        }
         return data.session?.access_token || null;
     } catch {
         return null;
@@ -79,6 +90,7 @@ export const refreshAccessToken = async (): Promise<string | null> => {
 
 export const getAccessToken = async (): Promise<string | null> => {
     const session: any = await getSession();
+    if (!session) return null;
     const accessToken = session?.access_token || null;
 
     // Evita tokens inválidos vindos de cache/cópia (ex: valores com "…")

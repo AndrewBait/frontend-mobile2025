@@ -1,3 +1,4 @@
+import { AdaptiveList } from '@/components/base/AdaptiveList';
 import { GradientBackground } from '@/components/GradientBackground';
 import { Colors } from '@/constants/Colors';
 import { DesignTokens } from '@/constants/designTokens';
@@ -10,7 +11,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
-    FlatList,
     Image,
     RefreshControl,
     StyleSheet,
@@ -114,7 +114,7 @@ export default function MerchantProductsScreen() {
         const isActive = item.is_active ?? item.active ?? true;
 
         // Get product info - Supabase returns 'products' (plural) from the join
-        const productData = (item as any).products || item.product;
+        const productData = item.products || item.product;
         const productName = productData?.nome || productData?.name || 'Produto sem nome';
         const productPhoto = productData?.foto1 || productData?.photo1 || null;
         const productCategory = productData?.categoria || productData?.category || '';
@@ -320,13 +320,14 @@ export default function MerchantProductsScreen() {
 
                 {/* Store Filter */}
                 {stores.length > 1 && (
-                    <FlatList
+                    <AdaptiveList
                         data={stores}
                         renderItem={renderStoreFilter}
                         keyExtractor={(item) => item.id}
                         horizontal
                         showsHorizontalScrollIndicator={false}
                         contentContainerStyle={styles.storesFilter}
+                        estimatedItemSize={120}
                     />
                 )}
 
@@ -344,12 +345,13 @@ export default function MerchantProductsScreen() {
                         </TouchableOpacity>
                     </View>
                 ) : (
-                    <FlatList
+                    <AdaptiveList
                         data={batches}
                         renderItem={renderBatch}
                         keyExtractor={(item) => item.id}
                         contentContainerStyle={styles.listContent}
                         showsVerticalScrollIndicator={false}
+                        estimatedItemSize={160}
                         refreshControl={
                             <RefreshControl
                                 refreshing={refreshing}

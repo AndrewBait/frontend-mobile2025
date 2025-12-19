@@ -1,9 +1,9 @@
+import { AdaptiveList } from '@/components/base/AdaptiveList';
 import React, { useState, useCallback } from 'react';
 import {
     StyleSheet,
     View,
     Text,
-    FlatList,
     TouchableOpacity,
     Alert,
     ActivityIndicator,
@@ -77,14 +77,14 @@ export default function MerchantStoresScreen() {
 
     const renderStore = ({ item }: { item: Store }) => {
         // Map PT-BR fields to EN (backend returns Portuguese field names)
-        const storeName = (item as any).nome || item.name || 'Loja sem nome';
-        const storeAddress = (item as any).endereco || item.address || '';
-        const storeCity = (item as any).cidade || item.city || '';
-        const storeState = (item as any).estado || item.state || '';
-        const storePhone = (item as any).telefone || item.phone || '';
-        const storeHours = (item as any).horario_funcionamento || item.hours || '';
+        const storeName = item.nome || item.name || 'Loja sem nome';
+        const storeAddress = item.endereco || item.address || '';
+        const storeCity = item.cidade || item.city || '';
+        const storeState = item.estado || item.state || '';
+        const storePhone = item.telefone || item.phone || '';
+        const storeHours = item.horario_funcionamento || item.hours || '';
         const storeCnpj = item.cnpj || '';
-        const isActive = (item as any).active ?? item.is_active ?? true;
+        const isActive = item.active ?? item.is_active ?? true;
         const isPremium = item.is_premium ?? false;
 
         return (
@@ -198,12 +198,13 @@ export default function MerchantStoresScreen() {
                 )}
 
                 {/* Stores List */}
-                <FlatList
+                <AdaptiveList
                     data={stores}
                     renderItem={renderStore}
                     keyExtractor={(item) => item.id}
                     contentContainerStyle={styles.listContent}
                     showsVerticalScrollIndicator={false}
+                    estimatedItemSize={180}
                     refreshControl={
                         <RefreshControl
                             refreshing={refreshing}

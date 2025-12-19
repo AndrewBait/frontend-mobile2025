@@ -31,7 +31,15 @@ const isFlashListSupported = (): boolean => {
 export function AdaptiveList<TItem>(props: AdaptiveListProps<TItem>) {
     const { estimatedItemSize, style, ...rest } = props as any;
 
-    if (FlashList && isFlashListSupported()) {
+    const numColumns = Number(rest?.numColumns || 0);
+    const hasColumnWrapperStyle = rest?.columnWrapperStyle != null;
+    const canUseFlashList =
+        FlashList &&
+        isFlashListSupported() &&
+        !hasColumnWrapperStyle &&
+        (numColumns <= 1);
+
+    if (canUseFlashList) {
         return (
             <View style={style}>
                 <FlashList {...rest} estimatedItemSize={estimatedItemSize} />

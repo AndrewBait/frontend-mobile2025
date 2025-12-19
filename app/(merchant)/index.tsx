@@ -70,6 +70,7 @@ export default function MerchantDashboard() {
         }
 
         console.log('Loading merchant dashboard...');
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
         try {
             // Add timeout
             const fetchStores = async () => {
@@ -79,10 +80,10 @@ export default function MerchantDashboard() {
             };
 
             const timeoutPromise = new Promise<Store[]>((resolve) =>
-                setTimeout(() => {
+                (timeoutId = setTimeout(() => {
                     console.log('Dashboard fetch timeout');
                     resolve([]);
-                }, 8000)
+                }, 8000))
             );
 
             const storesData = await Promise.race([fetchStores(), timeoutPromise]);
@@ -111,6 +112,7 @@ export default function MerchantDashboard() {
                 console.error('Error loading dashboard:', error);
             }
         } finally {
+            if (timeoutId) clearTimeout(timeoutId);
             setLoading(false);
             setRefreshing(false);
         }

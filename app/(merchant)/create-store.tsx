@@ -104,16 +104,16 @@ export default function CreateStoreScreen() {
             console.log('Store loaded:', store);
 
             // Map PT-BR fields from backend
-            const storeName = (store as any).nome || store.name || '';
-            const storeType = (store as any).tipo || store.type || '';
-            const storePhone = (store as any).telefone || store.phone || '';
-            const storeHours = (store as any).horario_funcionamento || store.hours || '';
-            const storeCep = (store as any).cep || store.zip || '';
-            const storeAddress = (store as any).endereco || store.address || '';
-            const storeCity = (store as any).cidade || store.city || '';
-            const storeState = (store as any).estado || store.state || '';
+            const storeName = store.nome || store.name || '';
+            const storeType = store.tipo || store.type || '';
+            const storePhone = store.telefone || store.phone || '';
+            const storeHours = store.horario_funcionamento || store.hours || '';
+            const storeCep = store.cep || store.zip || '';
+            const storeAddress = store.endereco || store.address || '';
+            const storeCity = store.cidade || store.city || '';
+            const storeState = store.estado || store.state || '';
             const storeLogo = store.logo_url || null;
-            const storeAsaasWalletId = (store as any).asaas_wallet_id || '';
+            const storeAsaasWalletId = store.asaas_wallet_id || '';
 
             setName(storeName);
             setCnpj(formatCNPJ(store.cnpj || ''));
@@ -410,7 +410,7 @@ export default function CreateStoreScreen() {
                         console.log('Logo uploaded:', uploadedLogoUrl);
 
                         // Update store with logo URL
-                        await api.updateStore(createdStore.id, { logo_url: uploadedLogoUrl } as any);
+                        await api.updateStore(createdStore.id, { logo_url: uploadedLogoUrl });
                         console.log('Store updated with logo');
                     } catch (uploadError: any) {
                         console.error('Logo upload failed:', uploadError);
@@ -750,15 +750,15 @@ export default function CreateStoreScreen() {
                         {errors.asaasWalletId && <Text style={styles.errorText}>{errors.asaasWalletId}</Text>}
                         <View style={styles.infoBox}>
                             <Ionicons name="information-circle-outline" size={18} color={Colors.primary} />
-                            <Text style={styles.infoText}>
-                                <Text style={styles.infoBold}>Como obter:</Text>{'\n'}
-                                1. Crie uma conta no Asaas (https://www.asaas.com){'\n'}
-                                2. Acesse "Carteiras" no painel do Asaas{'\n'}
-                                3. Crie uma nova carteira para sua loja{'\n'}
-                                4. Copie o Wallet ID (formato UUID){'\n'}
-                                5. Cole aqui no cadastro da loja{'\n\n'}
-                                <Text style={styles.infoBold}>Importante:</Text> O Wallet ID da loja deve ser diferente do Wallet ID da plataforma. Em produção, não é permitido usar o mesmo wallet para loja e plataforma.
-                            </Text>
+                                <Text style={styles.infoText}>
+                                    <Text style={styles.infoBold}>Como obter:</Text>{'\n'}
+                                    1. Crie uma conta no Asaas (https://www.asaas.com){'\n'}
+                                    2. Acesse {'"'}Carteiras{'"'} no painel do Asaas{'\n'}
+                                    3. Crie uma nova carteira para sua loja{'\n'}
+                                    4. Copie o Wallet ID (formato UUID){'\n'}
+                                    5. Cole aqui no cadastro da loja{'\n\n'}
+                                    <Text style={styles.infoBold}>Importante:</Text> O Wallet ID da loja deve ser diferente do Wallet ID da plataforma. Em produção, não é permitido usar o mesmo wallet para loja e plataforma.
+                                </Text>
                         </View>
                     </View>
 

@@ -7,62 +7,112 @@ import { Colors } from '@/constants/Colors';
 import { API_BASE_URL } from '@/constants/config';
 import { api } from '@/services/api';
 import { supabase } from '@/services/supabase';
-import { getGlobalRedirectInProgress, setGlobalRedirectInProgress } from '@/utils/redirectLock';
+import {
+    getGlobalRedirectInProgress,
+    isAuthSessionLockActive,
+    releaseAuthSessionLock,
+    setGlobalRedirectInProgress,
+    tryAcquireAuthSessionLock,
+} from '@/utils/redirectLock';
 
 export default function AuthCallbackScreen() {
     const params = useLocalSearchParams();
     const url = useURL();
-    const hasProcessed = useRef(false);
-    const isProcessing = useRef(false);
+    const isHandlingCallback = useRef(false);
+    const isRedirecting = useRef(false);
+    const lastProcessedUrl = useRef<string | null>(null);
 
     useEffect(() => {
         // This callback screen is mainly for deep links
         // For OAuth flow, tokens are processed in index.tsx
         // Prevent infinite loops by checking if we already processed
-        if (hasProcessed.current || isProcessing.current) {
+        if (isHandlingCallback.current) {
             console.log('[AuthCallback] Já processado ou em processamento, ignorando...');
             return;
         }
 
-        console.log('[AuthCallback] Callback screen montado');
-        console.log('[AuthCallback] URL:', url);
-        console.log('[AuthCallback] Params:', Object.keys(params));
-        
-        // Small delay to avoid race conditions
-        const timer = setTimeout(() => {
-            if (!hasProcessed.current && !isProcessing.current) {
-                hasProcessed.current = true;
-                isProcessing.current = true;
-                
-                // If we have a session, redirect to app
-                // Otherwise, redirect to login
-                const checkSession = async () => {
-                    try {
-                        console.log('[AuthCallback] Verificando sessão...');
-                        const { data: { session } } = await supabase.auth.getSession();
-                        if (session) {
-                            console.log('[AuthCallback] Sessão encontrada, redirecionando para app...');
-                            await redirectToApp();
-                        } else {
-                            console.log('[AuthCallback] Nenhuma sessão, redirecionando para login...');
-                            router.replace('/');
-                        }
-                    } catch (error) {
-                        console.error('[AuthCallback] Erro:', error);
-                        router.replace('/');
-                    } finally {
-                        isProcessing.current = false;
-                    }
-                };
-                
-                checkSession();
+        isHandlingCallback.current = true;
+        if (url && lastProcessedUrl.current === url) {
+            console.log('[AuthCallback] URL já processada, ignorando...');
+            isHandlingCallback.current = false;
+            return;
+        }
+        if (url) {
+            lastProcessedUrl.current = url;
+        }
+
+        const waitForSession = async (timeoutMs: number) => {
+            const startedAt = Date.now();
+            while (Date.now() - startedAt < timeoutMs) {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (session) return session;
+                await new Promise((resolve) => setTimeout(resolve, 250));
             }
-        }, 500);
+            return null;
+        };
 
-        return () => clearTimeout(timer);
-    }, []);
+        const run = async () => {
+            try {
+                console.log('[AuthCallback] Callback screen montado');
+                console.log('[AuthCallback] URL:', url);
+                console.log('[AuthCallback] Params:', Object.keys(params));
 
-    const handleCallback = async (callbackUrl: string) => {
+                // If LoginScreen is processing the OAuth flow, do not attempt to consume the refresh token here.
+                // Just wait briefly for a session to appear (token rotation makes refresh tokens single-use).
+                if (isAuthSessionLockActive()) {
+                    console.log('[AuthCallback] Auth lock ativo - aguardando sessão criada pela LoginScreen...');
+                    const session = await waitForSession(5000);
+                    if (session) {
+                        console.log('[AuthCallback] Sessão encontrada após aguardar lock, redirecionando...');
+                        await redirectToApp();
+                        return;
+                    }
+                }
+
+                // If we already have a session, just redirect.
+                const { data: { session } } = await supabase.auth.getSession();
+                if (session) {
+                    console.log('[AuthCallback] Sessão encontrada, redirecionando para app...');
+                    await redirectToApp();
+                    return;
+                }
+
+                // No session: attempt to process tokens from deep link URL.
+                if (!url) {
+                    console.log('[AuthCallback] Nenhuma URL encontrada ainda, aguardando...');
+                    return;
+                }
+
+                const lockOwner = 'auth-callback';
+                const acquired = tryAcquireAuthSessionLock(lockOwner);
+                if (!acquired) {
+                    console.log('[AuthCallback] Não foi possível adquirir auth lock, aguardando sessão...');
+                    const sessionAfterWait = await waitForSession(5000);
+                    if (sessionAfterWait) {
+                        await redirectToApp();
+                        return;
+                    }
+                    router.replace('/');
+                    return;
+                }
+
+                try {
+                    await handleCallback(url);
+                } finally {
+                    releaseAuthSessionLock(lockOwner);
+                }
+            } catch (error) {
+                console.error('[AuthCallback] Erro:', error);
+                router.replace('/');
+            } finally {
+                isHandlingCallback.current = false;
+            }
+        };
+
+        run();
+    }, [url]);
+
+    async function handleCallback(callbackUrl: string) {
         try {
             console.log('[AuthCallback] ========== INICIANDO PROCESSAMENTO ==========');
             console.log('[AuthCallback] URL recebida:', callbackUrl);
@@ -108,6 +158,21 @@ export default function AuthCallbackScreen() {
                         });
 
                         if (error) {
+                            const message = error?.message || '';
+                            const isInvalidRefreshToken =
+                                message.includes('Invalid Refresh Token') ||
+                                message.includes('Refresh Token Not Found');
+
+                            if (isInvalidRefreshToken) {
+                                console.warn('[AuthCallback] Refresh token já foi consumido, verificando sessão...');
+                                const { data: { session: recoveredSession } } = await supabase.auth.getSession();
+                                if (recoveredSession) {
+                                    console.log('[AuthCallback] Sessão encontrada após erro - redirecionando...');
+                                    await redirectToApp();
+                                    return;
+                                }
+                            }
+
                             console.error('[AuthCallback] ERRO ao configurar sessão:', error);
                             throw error;
                         }
@@ -170,18 +235,18 @@ export default function AuthCallbackScreen() {
             console.error('[AuthCallback] Stack:', error?.stack);
             router.replace('/');
         }
-    };
+    }
 
-    const redirectToApp = async () => {
+    async function redirectToApp() {
         // Prevent multiple simultaneous calls (check both local and global flags)
         const globalLock = getGlobalRedirectInProgress();
-        if (isProcessing.current || globalLock) {
-            console.log('[AuthCallback] redirectToApp já em execução (local:', isProcessing.current, 'global:', globalLock, '), ignorando...');
+        if (isRedirecting.current || globalLock) {
+            console.log('[AuthCallback] redirectToApp já em execução (local:', isRedirecting.current, 'global:', globalLock, '), ignorando...');
             return;
         }
 
         try {
-            isProcessing.current = true;
+            isRedirecting.current = true;
             setGlobalRedirectInProgress(true);
             console.log('[AuthCallback] ========== REDIRECIONANDO PARA APP ==========');
             console.log('[AuthCallback] Verificando perfil do usuário...');
@@ -249,7 +314,7 @@ export default function AuthCallbackScreen() {
                     roleValue: String(user?.role),
                     hasRole: !!user?.role
                 });
-                isProcessing.current = false;
+                isRedirecting.current = false;
                 setGlobalRedirectInProgress(false);
                 router.replace('/select-role');
                 return; // Important: return early to prevent further execution
@@ -262,7 +327,7 @@ export default function AuthCallbackScreen() {
                 if (seemsLikeAutoAssigned) {
                     console.log('[AuthCallback] ⚠️ Role "customer" parece ter sido atribuído automaticamente pelo backend');
                     console.log('[AuthCallback] Usuário novo sem dados - Redirecionando para seleção de role');
-                    isProcessing.current = false;
+                    isRedirecting.current = false;
                     setGlobalRedirectInProgress(false);
                     router.replace('/select-role');
                     return;
@@ -270,7 +335,7 @@ export default function AuthCallbackScreen() {
                     // Se o usuário TEM role "customer" E tem perfil completo → vai direto para dashboard
                     console.log('[AuthCallback] ✅ Consumidor com cadastro completo - Redirecionando para dashboard (ofertas)');
                     console.log('[AuthCallback] Motivo: profile_complete=' + isProfileComplete + ', hasPhone=' + hasPhone);
-                    isProcessing.current = false;
+                    isRedirecting.current = false;
                     setGlobalRedirectInProgress(false);
                     router.replace('/(customer)');
                     return;
@@ -278,7 +343,7 @@ export default function AuthCallbackScreen() {
                     // Tem role mas não tem dados completos (ex: cadastro parcial)
                     console.log('[AuthCallback] ⚠️ Consumidor com role mas sem dados completos - Redirecionando para setup');
                     console.log('[AuthCallback] Faltando: profile_complete=' + isProfileComplete + ', phone=' + (phoneValue || '(vazio)'));
-                    isProcessing.current = false;
+                    isRedirecting.current = false;
                     setGlobalRedirectInProgress(false);
                     router.replace('/(customer)/setup');
                     return;
@@ -287,13 +352,13 @@ export default function AuthCallbackScreen() {
                 // Para lojista, se tem role já vai direto (assumindo que lojista já tem cadastro se tem role)
                 console.log('[AuthCallback] ✅ Lojista - Redirecionando para dashboard');
                 // Reset flags before redirecting to ensure navigation works
-                isProcessing.current = false;
+                isRedirecting.current = false;
                 setGlobalRedirectInProgress(false);
                 router.replace('/(merchant)');
                 return; // Return early after redirect
             } else {
                 console.log('[AuthCallback] ⚠️ Role desconhecido:', role, '- Redirecionando para seleção');
-                isProcessing.current = false;
+                isRedirecting.current = false;
                 setGlobalRedirectInProgress(false);
                 router.replace('/select-role');
                 return;
@@ -325,10 +390,10 @@ export default function AuthCallbackScreen() {
                 router.replace('/select-role');
             }
         } finally {
-            isProcessing.current = false;
+            isRedirecting.current = false;
             setGlobalRedirectInProgress(false);
         }
-    };
+    }
 
     return (
         <GradientBackground>

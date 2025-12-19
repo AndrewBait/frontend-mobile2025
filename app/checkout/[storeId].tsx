@@ -5,7 +5,8 @@ import { ProfileRequiredModal } from '@/components/ProfileRequiredModal';
 import { Colors } from '@/constants/Colors';
 import { DesignTokens } from '@/constants/designTokens';
 import { useAuth } from '@/contexts/AuthContext';
-import { api, Batch, Cart, CartItem, Order, Store } from '@/services/api';
+import { api, Batch, Cart, CartItem, MultiCart, Order, Store } from '@/services/api';
+import { supabase } from '@/services/supabase';
 import { copyToClipboard } from '@/utils/clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -33,7 +34,7 @@ export default function CheckoutScreen() {
     const insets = useSafeAreaInsets();
     const screenPaddingTop = insets.top + DesignTokens.spacing.md;
     const { isProfileComplete } = useAuth();
-    const [cart, setCart] = useState<Cart | null>(null);
+    const [cart, setCart] = useState<Cart | MultiCart | null>(null);
     const [order, setOrder] = useState<Order | null>(null);
     const [loading, setLoading] = useState(true);
     const [processing, setProcessing] = useState(false);
@@ -91,7 +92,7 @@ export default function CheckoutScreen() {
         let isMounted = true;
         setIsCheckingPayment(true);
 
-        const check = async () => {
+        const fetchLatest = async () => {
             try {
                 const updated = await api.getMyOrder(order.id);
                 if (!isMounted) return;
@@ -105,15 +106,33 @@ export default function CheckoutScreen() {
                     router.replace(`/order/${updated.id}`);
                 }
             } catch {
-                // Silencioso: rede pode oscilar; mantém polling
+                // Silencioso: rede pode oscilar; mantém fallback
             }
         };
 
-        check();
-        const interval = setInterval(check, 2500);
+        fetchLatest();
+
+        const channel = supabase
+            .channel(`order-status:${order.id}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'orders',
+                    filter: `id=eq.${order.id}`,
+                },
+                () => {
+                    fetchLatest();
+                }
+            )
+            .subscribe();
+
+        const interval = setInterval(fetchLatest, 10000);
         return () => {
             isMounted = false;
             clearInterval(interval);
+            supabase.removeChannel(channel);
             setIsCheckingPayment(false);
         };
     }, [order?.id]);
@@ -140,10 +159,10 @@ export default function CheckoutScreen() {
             let currentOrder = order;
             if (!currentOrder) {
                 // Reservar estoque antes de criar o pedido
-                await api.reserveCart();
+                await api.reserveCart(storeId);
 
                 // Create order
-                const createdOrder = await api.createOrder();
+                const createdOrder = await api.createOrder(storeId);
                 currentOrder = createdOrder;
                 setOrder(createdOrder);
             }
@@ -240,7 +259,8 @@ export default function CheckoutScreen() {
         );
     }
 
-    const storeItems = (cart?.items || []).filter((item) => getBatchFromItem(item)?.store_id === storeId);
+    const storeCart = cart ? api.getCartsArray(cart).find((c) => c.store_id === storeId) : undefined;
+    const storeItems = storeCart?.items || [];
     const total = storeItems.reduce((acc, item) => {
         const batch = getBatchFromItem(item);
         const promoPrice = batch?.preco_promocional ?? batch?.promo_price ?? 0;
@@ -819,6 +839,24 @@ const styles = StyleSheet.create({
         height: 220,
         backgroundColor: Colors.surfaceMuted,
         borderRadius: DesignTokens.borderRadius.md,
+    },
+    qrCodePlaceholder: {
+        width: '100%',
+        backgroundColor: Colors.backgroundCard,
+        borderRadius: DesignTokens.borderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.glassBorder,
+        padding: DesignTokens.spacing.lg,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: DesignTokens.spacing.md,
+        gap: DesignTokens.spacing.sm,
+        ...DesignTokens.shadows.sm,
+    },
+    qrCodePlaceholderText: {
+        fontSize: 14,
+        color: Colors.textMuted,
+        textAlign: 'center',
     },
     ordersButton: {
         paddingVertical: 14,

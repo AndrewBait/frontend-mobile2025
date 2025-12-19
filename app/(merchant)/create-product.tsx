@@ -1,7 +1,9 @@
 import { GradientBackground } from '@/components/GradientBackground';
 import { SelectInput } from '@/components/SelectInput';
+import { useToast } from '@/components/feedback/Toast';
 import { Colors } from '@/constants/Colors';
 import { DesignTokens } from '@/constants/designTokens';
+import { useErrorHandler } from '@/hooks/useErrorHandler';
 import { api, Store } from '@/services/api';
 import { uploadProductImage } from '@/services/storage';
 import {
@@ -56,6 +58,9 @@ export default function CreateProductScreen() {
     const isEditMode = !!params.editProductId;
     const editProductId = params.editProductId;
     const editBatchId = params.editBatchId;
+
+    const { showToast } = useToast();
+    const { handleError } = useErrorHandler();
 
     const [loading, setLoading] = useState(false);
     const [loadingStores, setLoadingStores] = useState(true);
@@ -124,10 +129,10 @@ export default function CreateProductScreen() {
             console.log('Loading existing product data...');
             // We need to get batch data which includes product info
             const batches = await api.getStoreBatches(params.storeId!);
-            const batch = batches.find((b: any) => b.id === editBatchId);
+            const batch = batches.find((b) => b.id === editBatchId);
 
             if (batch) {
-                const product = (batch as any).products || batch.product;
+                const product = batch.products || batch.product;
 
                 // Fill in product data
                 setName(product?.nome || product?.name || '');
@@ -168,7 +173,9 @@ export default function CreateProductScreen() {
             }
         } catch (error) {
             console.error('Error loading product data:', error);
-            Alert.alert('Erro', 'Não foi possível carregar os dados do produto.');
+            handleError(error, {
+                fallbackMessage: 'Não foi possível carregar os dados do produto.',
+            });
         } finally {
             setLoadingEditData(false);
         }
@@ -393,12 +400,12 @@ export default function CreateProductScreen() {
 
     const handleSubmit = async () => {
         if (!selectedStore) {
-            Alert.alert('Erro', 'Selecione uma loja primeiro.');
+            showToast('Selecione uma loja primeiro.', 'warning');
             return;
         }
 
         if (!validateForm()) {
-            Alert.alert('Erro', 'Por favor, corrija os campos destacados.');
+            showToast('Por favor, corrija os campos destacados.', 'warning');
             return;
         }
 
@@ -456,19 +463,16 @@ export default function CreateProductScreen() {
                 // Update the batch
                 if (editBatchId) {
                     await api.updateBatch(editBatchId, {
-                        preco_promocional: promPrice,
-                        data_vencimento: isoDate,
-                        estoque_total: parseInt(stock),
-                        status: isActive ? 'active' : 'inactive',
+                        promo_price: promPrice,
+                        expiration_date: isoDate,
+                        stock: parseInt(stock),
+                        is_active: isActive,
                     });
                     console.log('Batch updated successfully');
                 }
 
-                Alert.alert(
-                    '✅ Produto Atualizado!',
-                    `${name} foi atualizado com sucesso.`,
-                    [{ text: 'OK', onPress: () => router.back() }]
-                );
+                showToast('Produto atualizado com sucesso!', 'success');
+                router.back();
             } else {
                 // CREATE MODE - Original logic
                 const product = await api.createProduct(selectedStore, {
@@ -528,15 +532,14 @@ export default function CreateProductScreen() {
 
                 console.log('Batch created successfully');
 
-                Alert.alert(
-                    '✅ Produto Cadastrado!',
-                    `${name} foi adicionado com ${discountPercent}% de desconto.`,
-                    [{ text: 'OK', onPress: () => router.back() }]
-                );
+                showToast('Produto cadastrado com sucesso!', 'success');
+                router.back();
             }
         } catch (error: any) {
             console.error('Error saving product:', error);
-            Alert.alert('Erro', error.message || 'Não foi possível salvar o produto. Tente novamente.');
+            handleError(error, {
+                fallbackMessage: 'Não foi possível salvar o produto. Tente novamente.',
+            });
         } finally {
             setLoading(false);
         }

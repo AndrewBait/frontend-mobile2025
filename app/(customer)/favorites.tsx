@@ -3,7 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { memo, useCallback, useMemo } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -27,57 +27,211 @@ import { EmptyState } from '@/components/feedback/EmptyState';
 import { GradientBackground } from '@/components/GradientBackground';
 import { Colors } from '@/constants/Colors';
 import { DesignTokens } from '@/constants/designTokens';
+import { useAuth } from '@/contexts/AuthContext';
 import { useCart } from '@/contexts/CartContext';
-import { api, Batch } from '@/services/api';
+import { api, Favorite } from '@/services/api';
+import { getOptimizedSupabaseImageUrl } from '@/utils/images';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+
+// Componente otimizado para item de favorito (extraído para evitar recriação)
+const FavoriteItem = memo<{
+    item: Favorite;
+    index: number;
+    onAddToCart: (favorite: Favorite) => void;
+    onRemove: (favoriteId: string) => void;
+}>(({ item, index, onAddToCart, onRemove }) => {
+    const opacity = useSharedValue(0);
+    const translateX = useSharedValue(-20);
+
+    React.useEffect(() => {
+        // Limitar stagger a 10 itens para evitar lag
+        const delay = Math.min(index, 10) * 30;
+        const timeoutId = setTimeout(() => {
+            opacity.value = withTiming(1, { duration: 200 });
+            translateX.value = withSpring(0, { damping: 18, stiffness: 200 });
+        }, delay);
+        return () => clearTimeout(timeoutId);
+    }, [index]);
+
+    const animatedStyle = useAnimatedStyle(() => ({
+        opacity: opacity.value,
+        transform: [{ translateX: translateX.value }],
+    }), []);
+
+    // Dados do batch e produto (memoizados)
+    const batch = item.product_batches;
+    const { productName, productPhoto, storeName, originalPrice, promoPrice, discountPercent } = useMemo(() => {
+        const productData = batch.products || batch.product;
+        const name = productData?.nome || productData?.name || 'Produto';
+        const photo = productData?.foto1 || productData?.photo1 || null;
+        const store =
+            batch.store?.nome ||
+            batch.store?.name ||
+            batch.stores?.nome ||
+            batch.stores?.name ||
+            'Loja';
+
+        const original = batch.original_price ?? batch.preco_normal_override ?? productData?.preco_normal ?? 0;
+        const promo = batch.promo_price ?? batch.preco_promocional ?? 0;
+        const discount = batch.discount_percent ?? batch.desconto_percentual ?? 0;
+
+        return {
+            productName: name,
+            productPhoto: photo,
+            storeName: store,
+            originalPrice: original,
+            promoPrice: promo,
+            discountPercent: discount,
+        };
+    }, [batch]);
+
+    const handlePress = useCallback(() => {
+        router.push(`/product/${item.product_batch_id}`);
+    }, [item.product_batch_id]);
+
+    const handleRemove = useCallback((e: any) => {
+        e.stopPropagation();
+        onRemove(item.id);
+    }, [item.id, onRemove]);
+
+    const handleAdd = useCallback(() => {
+        onAddToCart(item);
+    }, [item, onAddToCart]);
+
+    return (
+        <Animated.View style={animatedStyle}>
+            <TouchableOpacity
+                style={styles.productCard}
+                onPress={handlePress}
+                activeOpacity={0.9}
+                accessibilityRole="button"
+                accessibilityLabel={`Ver detalhes de ${productName}`}
+            >
+                {productPhoto ? (
+                    <Image
+                        source={{
+                            uri:
+                                getOptimizedSupabaseImageUrl(productPhoto, { width: 400, quality: 80 }) ||
+                                productPhoto,
+                        }}
+                        style={styles.productImage}
+                        contentFit="cover"
+                        transition={200}
+                    />
+                ) : (
+                    <View style={[styles.productImage, styles.imagePlaceholder]}>
+                        <Ionicons name="image-outline" size={32} color={Colors.textMuted} />
+                    </View>
+                )}
+
+                <View style={styles.productInfo}>
+                    <Text style={styles.storeName}>{storeName}</Text>
+                    <Text style={styles.productName} numberOfLines={2}>
+                        {productName}
+                    </Text>
+
+                    <View style={styles.priceRow}>
+                        {originalPrice > promoPrice && (
+                            <Text style={styles.originalPrice}>
+                                R$ {originalPrice.toFixed(2).replace('.', ',')}
+                            </Text>
+                        )}
+                        <Text style={styles.promoPrice}>
+                            R$ {promoPrice.toFixed(2).replace('.', ',')}
+                        </Text>
+                        {discountPercent > 0 && (
+                            <Badge
+                                label={`-${Math.round(discountPercent)}%`}
+                                variant="error"
+                                size="sm"
+                            />
+                        )}
+                    </View>
+
+                    <View style={styles.actionsRow}>
+                        <Button
+                            title="Adicionar"
+                            onPress={handleAdd}
+                            variant="primary"
+                            size="sm"
+                            leftIcon={<Ionicons name="cart" size={16} color={Colors.text} />}
+                            style={styles.addButton}
+                            hapticFeedback
+                        />
+
+                        <TouchableOpacity
+                            style={styles.removeButton}
+                            onPress={handleRemove}
+                            accessibilityRole="button"
+                            accessibilityLabel="Remover dos favoritos"
+                            accessibilityHint={`Remove ${productName} da lista de favoritos`}
+                        >
+                            <Ionicons name="heart-dislike" size={18} color={Colors.error} />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </TouchableOpacity>
+        </Animated.View>
+    );
+}, (prevProps, nextProps) => {
+    // Comparação customizada: só re-renderizar se o item mudou
+    return prevProps.item.id === nextProps.item.id && prevProps.index === nextProps.index;
+});
+
+FavoriteItem.displayName = 'FavoriteItem';
 
 export default function FavoritesScreen() {
     const insets = useSafeAreaInsets();
     const screenPaddingTop = insets.top + DesignTokens.spacing.md;
+    const { session, user } = useAuth();
     const { incrementCartCount, updateCartCache } = useCart();
-    const [favorites, setFavorites] = useState<Batch[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
+    const queryClient = useQueryClient();
+    const enabled = Boolean(session && user && user.role === 'customer');
+
+    const favoritesQuery = useQuery({
+        queryKey: ['favorites'],
+        queryFn: () => api.getFavorites(),
+        enabled,
+        staleTime: 30000,
+    });
 
     useFocusEffect(
         useCallback(() => {
-            loadFavorites();
-        }, [])
+            if (!enabled) return;
+            queryClient.invalidateQueries({ queryKey: ['favorites'] });
+        }, [enabled, queryClient])
     );
 
-    const loadFavorites = async () => {
-        console.log('Loading favorites...');
-        try {
-            // Add timeout
-            const fetchFavorites = api.getFavorites();
-            const timeoutPromise = new Promise<Batch[]>((resolve) =>
-                setTimeout(() => {
-                    console.log('Favorites fetch timeout');
-                    resolve([]);
-                }, 5000)
-            );
-
-            const data = await Promise.race([fetchFavorites, timeoutPromise]);
-            console.log('Favorites loaded:', data.length);
-            setFavorites(data);
-        } catch (error) {
-            console.error('Error loading favorites:', error);
-            setFavorites([]);
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    };
-
     const onRefresh = () => {
-        setRefreshing(true);
-        loadFavorites();
+        favoritesQuery.refetch();
     };
 
-    const handleRemoveFavorite = async (id: string) => {
+    const removeFavoriteMutation = useMutation({
+        mutationFn: (favoriteId: string) => api.removeFavorite(favoriteId),
+        onMutate: async (favoriteId: string) => {
+            await queryClient.cancelQueries({ queryKey: ['favorites'] });
+            const previous = queryClient.getQueryData<Favorite[]>(['favorites']);
+
+            queryClient.setQueryData<Favorite[]>(['favorites'], (current) => {
+                return (current || []).filter((f) => f.id !== favoriteId);
+            });
+
+            return { previous };
+        },
+        onError: (_err, _favoriteId, context) => {
+            if (context?.previous) {
+                queryClient.setQueryData(['favorites'], context.previous);
+            }
+        },
+        onSettled: () => {
+            queryClient.invalidateQueries({ queryKey: ['favorites'] });
+        },
+    });
+
+    const handleRemoveFavorite = async (favoriteId: string) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         try {
-            await api.removeFavorite(id);
-            setFavorites(prev => prev.filter(f => f.id !== id));
+            await removeFavoriteMutation.mutateAsync(favoriteId);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         } catch (error) {
             console.error('Error removing favorite:', error);
@@ -85,13 +239,14 @@ export default function FavoritesScreen() {
         }
     };
 
-    const handleAddToCart = async (batch: Batch) => {
+    const handleAddToCart = async (favorite: Favorite) => {
+        const batchId = favorite.product_batch_id;
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         // ATUALIZAÇÃO OTIMISTA: Atualizar badge imediatamente
         incrementCartCount(1);
         
         try {
-            const result = await api.addToCart(batch.id, 1);
+            const result = await api.addToCart(batchId, 1);
             
             // Usar resposta diretamente para atualizar cache (evita requisição extra)
             updateCartCache(result);
@@ -150,7 +305,7 @@ export default function FavoritesScreen() {
                             style: 'destructive',
                             onPress: async () => {
                                 try {
-                                    const result = await api.addToCart(batch.id, 1, true); // replaceCart=true
+                                    const result = await api.addToCart(batchId, 1, true); // replaceCart=true
                                     
                                     // Usar resposta diretamente para atualizar cache
                                     updateCartCache(result);
@@ -179,112 +334,11 @@ export default function FavoritesScreen() {
         }
     };
 
-    // Componente separado para poder usar hooks
-    const FavoriteItem: React.FC<{ item: Batch; index: number; onAddToCart: (batch: Batch) => void; onRemove: (id: string) => void }> = ({ item, index, onAddToCart, onRemove }) => {
-        const opacity = useSharedValue(0);
-        const translateX = useSharedValue(-20);
+    const favorites = favoritesQuery.data ?? [];
+    const loading = favoritesQuery.isLoading;
+    const refreshing = favoritesQuery.isRefetching;
 
-        React.useEffect(() => {
-            const delay = index * 50;
-            setTimeout(() => {
-                opacity.value = withTiming(1, { duration: DesignTokens.animations.normal });
-                translateX.value = withSpring(0, { damping: 15, stiffness: 150 });
-            }, delay);
-        }, [index, opacity, translateX]);
-
-        const animatedStyle = useAnimatedStyle(() => ({
-            opacity: opacity.value,
-            transform: [{ translateX: translateX.value }],
-        }));
-
-        // Handle both frontend format and backend format (Portuguese/plural)
-        const productData = item.products || item.product;
-        const productName = productData?.nome || productData?.name || 'Produto';
-        const productPhoto = productData?.foto1 || productData?.photo1 || null;
-        const storeName = item.store?.nome || item.store?.name || 'Loja';
-        
-        // Handle price fields (Portuguese/English)
-        const originalPrice = item.original_price ?? item.preco_normal_override ?? productData?.preco_normal ?? 0;
-        const promoPrice = item.promo_price ?? item.preco_promocional ?? 0;
-        const discountPercent = item.discount_percent ?? item.desconto_percentual ?? 0;
-
-        return (
-            <Animated.View style={animatedStyle}>
-                <TouchableOpacity
-                    style={styles.productCard}
-                    onPress={() => router.push(`/product/${item.id}`)}
-                    activeOpacity={0.9}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Ver detalhes de ${productName}`}
-                >
-                {productPhoto ? (
-                    <Image
-                        source={{ uri: productPhoto }}
-                        style={styles.productImage}
-                        contentFit="cover"
-                        transition={200}
-                    />
-                ) : (
-                    <View style={[styles.productImage, styles.imagePlaceholder]}>
-                        <Ionicons name="image-outline" size={32} color={Colors.textMuted} />
-                    </View>
-                )}
-
-                <View style={styles.productInfo}>
-                    <Text style={styles.storeName}>{storeName}</Text>
-                    <Text style={styles.productName} numberOfLines={2}>
-                        {productName}
-                    </Text>
-
-                    <View style={styles.priceRow}>
-                        {originalPrice > promoPrice && (
-                            <Text style={styles.originalPrice}>
-                                R$ {originalPrice.toFixed(2).replace('.', ',')}
-                            </Text>
-                        )}
-                        <Text style={styles.promoPrice}>
-                            R$ {promoPrice.toFixed(2).replace('.', ',')}
-                        </Text>
-                        {discountPercent > 0 && (
-                            <Badge
-                                label={`-${Math.round(discountPercent)}%`}
-                                variant="error"
-                                size="sm"
-                            />
-                        )}
-                    </View>
-
-                    <View style={styles.actionsRow}>
-                        <Button
-                            title="Adicionar"
-                            onPress={() => onAddToCart(item)}
-                            variant="primary"
-                            size="sm"
-                            leftIcon={<Ionicons name="cart" size={16} color={Colors.text} />}
-                            style={styles.addButton}
-                            hapticFeedback
-                        />
-
-                        <TouchableOpacity
-                            style={styles.removeButton}
-                            onPress={(e) => {
-                                e.stopPropagation();
-                                onRemove(item.id);
-                            }}
-                            accessibilityRole="button"
-                            accessibilityLabel="Remover dos favoritos"
-                            accessibilityHint={`Remove ${productName} da lista de favoritos`}
-                        >
-                            <Ionicons name="heart-dislike" size={18} color={Colors.error} />
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </TouchableOpacity>
-            </Animated.View>
-        );
-    };
-
-    const renderFavorite = ({ item, index }: { item: Batch; index: number }) => {
+    const renderFavorite = useCallback(({ item, index }: { item: Favorite; index: number }) => {
         return (
             <FavoriteItem
                 item={item}
@@ -293,7 +347,7 @@ export default function FavoritesScreen() {
                 onRemove={handleRemoveFavorite}
             />
         );
-    };
+    }, [handleAddToCart, handleRemoveFavorite]);
 
     if (loading) {
         return (

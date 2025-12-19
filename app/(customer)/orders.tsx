@@ -40,14 +40,15 @@ export default function OrdersScreen() {
 
     const loadOrders = async () => {
         console.log('Loading orders...');
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
         try {
             // Add timeout
             const fetchOrders = api.getMyOrders();
             const timeoutPromise = new Promise<Order[]>((resolve) =>
-                setTimeout(() => {
+                (timeoutId = setTimeout(() => {
                     console.log('Orders fetch timeout');
                     resolve([]);
-                }, 5000)
+                }, 5000))
             );
 
             const data = await Promise.race([fetchOrders, timeoutPromise]);
@@ -57,6 +58,7 @@ export default function OrdersScreen() {
             console.error('Error loading orders:', error);
             setOrders([]);
         } finally {
+            if (timeoutId) clearTimeout(timeoutId);
             setLoading(false);
             setRefreshing(false);
         }

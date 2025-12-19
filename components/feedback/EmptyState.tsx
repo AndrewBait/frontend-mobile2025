@@ -10,7 +10,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Colors } from '@/constants/Colors';
 import { DesignTokens } from '@/constants/designTokens';
-import { Button } from '@/components/base/Button';
+import { Button, ButtonVariant } from '@/components/base/Button';
 
 interface EmptyStateProps {
     icon?: keyof typeof Ionicons.glyphMap;
@@ -18,6 +18,9 @@ interface EmptyStateProps {
     message: string;
     actionLabel?: string;
     onAction?: () => void;
+    secondaryActionLabel?: string;
+    onSecondaryAction?: () => void;
+    secondaryActionVariant?: ButtonVariant;
     style?: ViewStyle;
     animated?: boolean;
 }
@@ -28,6 +31,9 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
     message,
     actionLabel,
     onAction,
+    secondaryActionLabel,
+    onSecondaryAction,
+    secondaryActionVariant = 'ghost',
     style,
     animated = true,
 }) => {
@@ -71,6 +77,15 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
                     style={styles.actionButton}
                 />
             )}
+            {secondaryActionLabel && onSecondaryAction && (
+                <Button
+                    title={secondaryActionLabel}
+                    onPress={onSecondaryAction}
+                    variant={secondaryActionVariant}
+                    size="md"
+                    style={styles.secondaryActionButton}
+                />
+            )}
         </View>
     );
 };
@@ -107,5 +122,8 @@ const styles = StyleSheet.create({
     },
     actionButton: {
         marginTop: DesignTokens.spacing.md,
+    },
+    secondaryActionButton: {
+        marginTop: DesignTokens.spacing.sm,
     },
 });
