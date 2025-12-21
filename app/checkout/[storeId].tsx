@@ -143,8 +143,8 @@ export default function CheckoutScreen() {
             return;
         }
 
-        // Validar se loja tem asaas_wallet_id configurado
-        if (!store?.asaas_wallet_id) {
+        // Validar se loja tem asaas_wallet_id configurado (exceto em DEV onde usamos mock)
+        if (!store?.asaas_wallet_id && !__DEV__) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             setToastMessage('Esta loja ainda não configurou o pagamento. Entre em contato com a loja.');
             setToastType('error');
