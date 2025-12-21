@@ -11,6 +11,7 @@ import {
     tryAcquireAuthSessionLock,
 } from '@/utils/redirectLock';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -54,6 +55,15 @@ export default function LoginScreen() {
 
     const checkExistingSession = async () => {
         try {
+            // Primeiro, verificar se o usuário já viu o onboarding
+            console.log('🔵 [LoginScreen] Verificando onboarding...');
+            const hasSeenOnboarding = await AsyncStorage.getItem('@venceja:hasSeenOnboarding');
+            if (!hasSeenOnboarding) {
+                console.log('🔵 [LoginScreen] Usuário não viu onboarding - redirecionando...');
+                router.replace('/onboarding');
+                return;
+            }
+
             console.log('🔵 [LoginScreen] Verificando sessão existente...');
             const currentSession = await getSession();
             console.log('🔵 [LoginScreen] Sessão encontrada:', !!currentSession);

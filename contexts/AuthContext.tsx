@@ -1,5 +1,6 @@
 import { api, User } from '@/services/api';
 import { getCurrentUser, getSession, supabase, signOut as supabaseSignOut } from '@/services/supabase';
+import { registerNotificationTokenWithBackend } from '@/utils/notifications';
 import { router } from 'expo-router';
 import React, { createContext, ReactNode, useContext, useEffect, useRef, useState } from 'react';
 
@@ -121,13 +122,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             console.log('[AuthContext] fetchUserProfile: Iniciando busca do perfil...');
             try {
                 const profile = await api.getProfile();
-                console.log('[AuthContext] fetchUserProfile: Perfil obtido do backend:', { 
-                    id: profile?.id, 
+                console.log('[AuthContext] fetchUserProfile: Perfil obtido do backend:', {
+                    id: profile?.id,
                     email: profile?.email,
-                    role: profile?.role 
+                    role: profile?.role
                 });
                 setUser(profile);
                 errorCountRef.current = 0; // Reset error count on success
+
+                // Registrar token de notificação após login bem-sucedido
+                // Não bloqueia o fluxo principal - executa em background
+                registerNotificationTokenWithBackend().catch(error => {
+                    console.log('[AuthContext] Aviso: Não foi possível registrar token de notificação:', error?.message);
+                    // Falha no registro de notificações não deve impedir o login
+                });
             } catch (error: any) {
                 // Track errors for exponential backoff
                 const isNetworkError = error?.message?.includes('Network request failed') || 

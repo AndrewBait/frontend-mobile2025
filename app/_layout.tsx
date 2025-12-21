@@ -46,6 +46,7 @@ export default function RootLayout() {
                 presentation: 'card',
               }}
             />
+            <Stack.Screen name="onboarding" />
             <Stack.Screen name="select-role" />
             <Stack.Screen name="(customer)" />
             <Stack.Screen name="(merchant)" />

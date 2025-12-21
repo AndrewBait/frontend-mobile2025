@@ -1264,22 +1264,76 @@ class ApiClient {
         return this.request(`/products/${productId}/media`);
     }
 
-    async getUploadUrl(productId: string): Promise<{ upload_url: string; file_path: string }> {
+    /**
+     * Obtém URL assinada para upload direto ao storage.
+     * Retorna { path, signedUrl } onde:
+     * - signedUrl: use para fazer PUT do arquivo
+     * - path: envie para createMedia após upload
+     */
+    async getUploadUrl(productId: string, ext: string = 'jpg'): Promise<{ path: string; signedUrl: string }> {
         return this.request(`/products/${productId}/media/upload-url`, {
             method: 'POST',
+            body: JSON.stringify({ ext }),
         });
     }
 
-    async createMedia(productId: string, filePath: string, type: string): Promise<void> {
+    /**
+     * Faz upload direto do arquivo para o storage usando a URL assinada
+     */
+    async uploadFile(signedUrl: string, file: Blob | File): Promise<void> {
+        const response = await fetch(signedUrl, {
+            method: 'PUT',
+            body: file,
+            headers: {
+                'Content-Type': file.type || 'image/jpeg',
+            },
+        });
+
+        if (!response.ok) {
+            throw new Error(`Upload failed: ${response.statusText}`);
+        }
+    }
+
+    /**
+     * Cria registro de mídia após upload bem-sucedido.
+     * Pode receber path (do storage) ou URL completa.
+     * Se enviar path, o backend gera a URL pública automaticamente.
+     */
+    async createMedia(productId: string, urlOrPath: string, type?: string): Promise<void> {
         return this.request(`/products/${productId}/media`, {
             method: 'POST',
-            body: JSON.stringify({ file_path: filePath, type }),
+            body: JSON.stringify({
+                url: urlOrPath,
+                tipo: type,
+            }),
         });
     }
 
     async deleteMedia(productId: string, mediaId: string): Promise<void> {
         return this.request(`/products/${productId}/media/${mediaId}`, {
             method: 'DELETE',
+        });
+    }
+
+    // ==================== NOTIFICATIONS ====================
+
+    /**
+     * Registra token de push notification para o usuário autenticado
+     */
+    async registerNotificationToken(token: string, platform: 'ios' | 'android' | 'web'): Promise<void> {
+        return this.request('/notifications/register', {
+            method: 'POST',
+            body: JSON.stringify({ token, platform }),
+        });
+    }
+
+    /**
+     * Remove token de push notification
+     */
+    async unregisterNotificationToken(token: string): Promise<void> {
+        return this.request('/notifications/unregister', {
+            method: 'DELETE',
+            body: JSON.stringify({ token }),
         });
     }
 }

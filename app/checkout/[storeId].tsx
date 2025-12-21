@@ -394,7 +394,7 @@ export default function CheckoutScreen() {
                             variant="primary"
                             size="lg"
                             loading={processing}
-                            disabled={!!storeError || !store?.asaas_wallet_id}
+                            disabled={!!storeError || (!__DEV__ && !store?.asaas_wallet_id)}
                             leftIcon={!processing ? <Ionicons name="card" size={20} color={Colors.text} /> : undefined}
                             fullWidth
                             hapticFeedback
