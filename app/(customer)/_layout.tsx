@@ -208,6 +208,7 @@ export default function CustomerLayout() {
                 name="setup"
                 options={{
                     href: null,
+                    tabBarStyle: { display: 'none' },
                 }}
             />
         </Tabs>

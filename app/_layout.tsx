@@ -8,6 +8,13 @@ import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-
 import React, { useEffect } from 'react';
 import { AppState } from 'react-native';
 
+// Segurança: evita vazamento de dados sensíveis em logs de produção.
+if (!__DEV__) {
+  console.log = () => undefined;
+  console.debug = () => undefined;
+  console.info = () => undefined;
+}
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

@@ -21,7 +21,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     KeyboardAvoidingView,
@@ -66,10 +66,12 @@ export default function CustomerSetupScreen() {
     const [radius, setRadius] = useState(DEFAULT_PICKUP_RADIUS);
     const [locationGranted, setLocationGranted] = useState(false);
     const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+    const lastCepLookupRef = useRef<string | null>(null);
 
     const loadExistingData = useCallback(async () => {
         if (!user) return;
 
+        setLoadingLocation(true);
         try {
             // Carregar perfil completo (inclui customer com CPF)
             const profile = await api.getProfile();
@@ -79,8 +81,62 @@ export default function CustomerSetupScreen() {
             if (profile.customer?.cpf) {
                 setCpf(formatCPF(profile.customer.cpf));
             }
+
+            if (typeof profile.radius_km === 'number' && profile.radius_km > 0) {
+                setRadius(profile.radius_km);
+            }
+
+            const hasCoords =
+                typeof profile.lat === 'number' &&
+                typeof profile.lng === 'number' &&
+                (profile.lat !== 0 || profile.lng !== 0);
+
+            if (hasCoords) {
+                setCoords({ lat: profile.lat as number, lng: profile.lng as number });
+                setLocationGranted(true);
+            }
+
+            const customerData = (profile.customer || {}) as any;
+            const hasSavedAddress = Boolean(customerData.cep);
+
+            // Source of truth: se o banco tem endereço salvo, usa ele e não sobrescreve por GPS.
+            if (hasSavedAddress) {
+                setCep(formatCEP(customerData.cep));
+                setAddress(customerData.endereco || '');
+                setNumber(customerData.numero || '');
+                setComplement(customerData.complemento || '');
+                setNeighborhood(customerData.bairro || '');
+                setCity(customerData.cidade || '');
+                setState(customerData.estado || '');
+                return { hasAddress: true, hasCoords };
+            }
+
+            // Se não tem endereço salvo mas tem coords, tenta reverse-geocode do GPS salvo
+            if (hasCoords) {
+                try {
+                    const reverseGeocode = await Location.reverseGeocodeAsync({
+                        latitude: profile.lat as number,
+                        longitude: profile.lng as number,
+                    });
+                    if (reverseGeocode.length > 0) {
+                        const addr = reverseGeocode[0];
+                        setCity(addr.city || '');
+                        setState(addr.region || '');
+                        setNeighborhood(addr.district || addr.subregion || '');
+                        if (addr.postalCode) setCep(formatCEP(addr.postalCode));
+                        if (addr.street) setAddress(addr.street);
+                    }
+                } catch (e) {
+                    console.warn('Geocode error', e);
+                }
+            }
+
+            return { hasAddress: false, hasCoords };
         } catch (error) {
             console.error('Error loading profile:', error);
+            return { hasAddress: false, hasCoords: false };
+        } finally {
+            setLoadingLocation(false);
         }
     }, [user]);
 
@@ -119,8 +175,20 @@ export default function CustomerSetupScreen() {
     }, []);
 
     useEffect(() => {
-        loadExistingData();
-        requestLocation();
+        let cancelled = false;
+        void (async () => {
+            const result = await loadExistingData();
+            if (cancelled) return;
+
+            // Se já temos endereço salvo (ou coords salvas), não força request de GPS aqui
+            if (result?.hasAddress || result?.hasCoords) return;
+
+            await requestLocation();
+        })();
+
+        return () => {
+            cancelled = true;
+        };
     }, [loadExistingData, requestLocation]);
 
     const handleCEPChange = useCallback(async (value: string) => {
@@ -128,20 +196,52 @@ export default function CustomerSetupScreen() {
         setCep(formatted);
 
         const cleaned = value.replace(/\D/g, '');
-        if (cleaned.length === 8) {
-            setLoadingCEP(true);
-            const addressData = await fetchAddressByCEP(cleaned);
-            setLoadingCEP(false);
+        // Limpa erro anterior enquanto digita
+        setErrors((prev) => (prev.cep ? { ...prev, cep: undefined } : prev));
 
-            if (addressData) {
-                setAddress(addressData.logradouro);
-                setNeighborhood(addressData.bairro);
-                setCity(addressData.localidade);
-                setState(addressData.uf);
-                setErrors(prev => ({ ...prev, cep: undefined }));
-            } else {
-                setErrors(prev => ({ ...prev, cep: 'CEP não encontrado' }));
+        // Se não tiver 8 dígitos, não busca (e evita aplicar resultado antigo)
+        if (cleaned.length !== 8) {
+            lastCepLookupRef.current = null;
+            setLoadingCEP(false);
+            return;
+        }
+
+        lastCepLookupRef.current = cleaned;
+        setLoadingCEP(true);
+
+        let addressData: Awaited<ReturnType<typeof fetchAddressByCEP>> = null;
+        try {
+            addressData = await fetchAddressByCEP(cleaned);
+        } catch {
+            // Segurança/UX: não propagar erro técnico para a UI
+            addressData = null;
+        } finally {
+            if (lastCepLookupRef.current === cleaned) {
+                setLoadingCEP(false);
             }
+        }
+
+        // Se o usuário mudou o CEP enquanto buscava, ignora este resultado
+        if (lastCepLookupRef.current !== cleaned) return;
+
+        if (addressData) {
+            setAddress(addressData.logradouro || '');
+            setNeighborhood(addressData.bairro || '');
+            setCity(addressData.localidade || '');
+            setState(addressData.uf || '');
+            setErrors((prev) => ({ ...prev, cep: undefined }));
+        } else {
+            // Falha (timeout/erro/conexão): limpa campos e mostra mensagem amigável
+            setAddress('');
+            setNeighborhood('');
+            setCity('');
+            setState('');
+            setNumber('');
+            setComplement('');
+            setErrors((prev) => ({
+                ...prev,
+                cep: 'CEP não encontrado ou erro de conexão',
+            }));
         }
     }, []);
 
@@ -189,14 +289,22 @@ export default function CustomerSetupScreen() {
 
             // CPF é obrigatório, sempre enviar
             const cleanCpf = cpf.replace(/\D/g, '');
-            if (coords) {
-                await api.updateLocation(coords.lat, coords.lng, radius, cleanCpf);
-                console.log('Location and CPF saved');
-            } else {
-                // Se não tiver coordenadas, atualizar apenas CPF (usar coordenadas padrão)
-                await api.updateLocation(0, 0, radius, cleanCpf);
-                console.log('CPF saved');
-            }
+            const cleanedCep = cep.replace(/\D/g, '');
+
+            await api.updateLocation({
+                lat: coords?.lat || 0,
+                lng: coords?.lng || 0,
+                radius_km: radius,
+                cpf: cleanCpf,
+                cep: cleanedCep.length === 8 ? cleanedCep : undefined,
+                address: address || undefined,
+                number: number || undefined,
+                complement: complement || undefined,
+                neighborhood: neighborhood || undefined,
+                city: city || undefined,
+                state: state && state.trim().length === 2 ? state.trim().toUpperCase() : undefined,
+            });
+            console.log('Location, CPF and address saved');
 
             await refreshUser();
 
@@ -208,7 +316,24 @@ export default function CustomerSetupScreen() {
         } finally {
             setLoading(false);
         }
-    }, [validateForm, pendingRole, phone, cpf, coords, radius, refreshUser, handleError, showToast]);
+    }, [
+        validateForm,
+        pendingRole,
+        phone,
+        cpf,
+        coords,
+        radius,
+        cep,
+        address,
+        number,
+        complement,
+        neighborhood,
+        city,
+        state,
+        refreshUser,
+        handleError,
+        showToast,
+    ]);
 
     // Validar se formulário tem erros críticos (phone e cpf vazios)
     const hasRequiredFields = useMemo(() => {

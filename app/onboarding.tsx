@@ -8,6 +8,7 @@ import React, { useRef, useState } from 'react';
 import {
     Animated,
     Dimensions,
+    Platform,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -224,7 +225,9 @@ const styles = StyleSheet.create({
     dot: {
         height: 8,
         borderRadius: 4,
-        transition: 'all 0.3s ease',
+        ...(Platform.OS === 'web'
+            ? ({ transition: 'all 0.3s ease' } as any)
+            : {}),
     },
     nextButton: {
         flexDirection: 'row',

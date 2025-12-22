@@ -1,18 +1,45 @@
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-// Configure how notifications appear when the app is in foreground
-Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-        shouldShowBanner: true,
-        shouldShowList: true,
-    }),
-});
+import type * as ExpoNotifications from 'expo-notifications';
+
+type ExpoNotificationsModule = typeof import('expo-notifications');
+
+let notificationsModulePromise: Promise<ExpoNotificationsModule | null> | null = null;
+let didConfigureHandler = false;
+
+const isExpoGo = () =>
+    (Constants as any)?.executionEnvironment === 'storeClient';
+
+const getNotificationsModule = async (): Promise<ExpoNotificationsModule | null> => {
+    if (notificationsModulePromise) return notificationsModulePromise;
+
+    notificationsModulePromise = (async () => {
+        if (isExpoGo()) return null;
+
+        try {
+            const mod = await import('expo-notifications');
+            if (!didConfigureHandler) {
+                didConfigureHandler = true;
+                mod.setNotificationHandler({
+                    handleNotification: async () => ({
+                        shouldShowAlert: true,
+                        shouldPlaySound: true,
+                        shouldSetBadge: true,
+                        shouldShowBanner: true,
+                        shouldShowList: true,
+                    }),
+                });
+            }
+            return mod;
+        } catch {
+            return null;
+        }
+    })();
+
+    return notificationsModulePromise;
+};
 
 export interface NotificationData extends Record<string, unknown> {
     type: 'new_order' | 'order_paid' | 'order_picked_up' | 'promo' | 'general';
@@ -24,13 +51,16 @@ export interface NotificationData extends Record<string, unknown> {
 
 class NotificationService {
     private expoPushToken: string | null = null;
-    private notificationListener: Notifications.EventSubscription | null = null;
-    private responseListener: Notifications.EventSubscription | null = null;
+    private notificationListener: ExpoNotifications.EventSubscription | null = null;
+    private responseListener: ExpoNotifications.EventSubscription | null = null;
 
     /**
      * Initialize notifications and register for push notifications
      */
     async initialize(): Promise<string | null> {
+        const Notifications = await getNotificationsModule();
+        if (!Notifications) return null;
+
         // Check if it's a physical device (push notifications don't work on simulators)
         if (!Device.isDevice) {
             console.log('Push notifications only work on physical devices');
@@ -55,15 +85,18 @@ class NotificationService {
 
             // Get the Expo push token
             // Use projectId from expo-constants (automatically set by EAS Build)
-            const projectId = Constants.expoConfig?.extra?.eas?.projectId;
-            
+            const projectId =
+                Constants.expoConfig?.extra?.eas?.projectId ||
+                Constants.easConfig?.projectId;
+
             if (!projectId) {
-                console.warn('Project ID not found. Push notifications may not work correctly. Make sure to build with EAS Build.');
+                console.warn(
+                    '[Notifications] ⚠️ EAS Project ID não configurado no app.json. Rode "eas init". Push notifications desativadas.',
+                );
+                return null;
             }
 
-            const tokenData = await Notifications.getExpoPushTokenAsync(
-                projectId ? { projectId } : undefined
-            );
+            const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
 
             this.expoPushToken = tokenData.data;
             console.log('Expo Push Token:', this.expoPushToken);
@@ -118,9 +151,19 @@ class NotificationService {
      * Set up notification event listeners
      */
     setupListeners(
-        onNotificationReceived?: (notification: Notifications.Notification) => void,
-        onNotificationResponse?: (response: Notifications.NotificationResponse) => void
+        onNotificationReceived?: (notification: ExpoNotifications.Notification) => void,
+        onNotificationResponse?: (response: ExpoNotifications.NotificationResponse) => void
     ): void {
+        void this.setupListenersAsync(onNotificationReceived, onNotificationResponse);
+    }
+
+    private async setupListenersAsync(
+        onNotificationReceived?: (notification: ExpoNotifications.Notification) => void,
+        onNotificationResponse?: (response: ExpoNotifications.NotificationResponse) => void
+    ) {
+        const Notifications = await getNotificationsModule();
+        if (!Notifications) return;
+
         // Listener for notifications received while app is foregrounded
         this.notificationListener = Notifications.addNotificationReceivedListener(
             (notification) => {
@@ -205,6 +248,12 @@ class NotificationService {
         data?: NotificationData,
         seconds: number = 1
     ): Promise<string> {
+        const Notifications = await getNotificationsModule();
+        if (!Notifications) {
+            console.warn('[Notifications] expo-notifications indisponível; pulando scheduleLocalNotification');
+            return '';
+        }
+
         const id = await Notifications.scheduleNotificationAsync({
             content: {
                 title,
@@ -226,6 +275,8 @@ class NotificationService {
      * Cancel all scheduled notifications
      */
     async cancelAllNotifications(): Promise<void> {
+        const Notifications = await getNotificationsModule();
+        if (!Notifications) return;
         await Notifications.cancelAllScheduledNotificationsAsync();
     }
 
@@ -240,6 +291,8 @@ class NotificationService {
      * Check if notifications are enabled
      */
     async areNotificationsEnabled(): Promise<boolean> {
+        const Notifications = await getNotificationsModule();
+        if (!Notifications) return false;
         const { status } = await Notifications.getPermissionsAsync();
         return status === 'granted';
     }
@@ -248,6 +301,8 @@ class NotificationService {
      * Get badge count
      */
     async getBadgeCount(): Promise<number> {
+        const Notifications = await getNotificationsModule();
+        if (!Notifications) return 0;
         return await Notifications.getBadgeCountAsync();
     }
 
@@ -255,6 +310,8 @@ class NotificationService {
      * Set badge count
      */
     async setBadgeCount(count: number): Promise<void> {
+        const Notifications = await getNotificationsModule();
+        if (!Notifications) return;
         await Notifications.setBadgeCountAsync(count);
     }
 }
@@ -263,4 +320,4 @@ class NotificationService {
 export const notificationService = new NotificationService();
 
 // Export types for convenience
-export type { Notifications };
+export type { ExpoNotifications as Notifications };

@@ -16,6 +16,31 @@ export interface User {
     created_at?: string;
 }
 
+export interface CustomerProfile {
+    cpf?: string;
+    cep?: string;
+    endereco?: string;
+    numero?: string;
+    complemento?: string;
+    bairro?: string;
+    cidade?: string;
+    estado?: string;
+}
+
+export interface UpdateLocationPayload {
+    lat: number;
+    lng: number;
+    radius_km?: number;
+    cpf?: string;
+    cep?: string;
+    address?: string;
+    number?: string;
+    complement?: string;
+    neighborhood?: string;
+    city?: string;
+    state?: string;
+}
+
 export interface Store {
     id: string;
     // IDs/relacionamentos
@@ -489,7 +514,7 @@ class ApiClient {
         };
     }
 
-    async getProfile(): Promise<User & { customer?: { cpf?: string } }> {
+    async getProfile(): Promise<User & { customer?: CustomerProfile }> {
         const response = await this.request<{ user: any; customer?: any }>('/me/profile');
 
         // Map backend fields (Portuguese) to frontend fields (English)
@@ -508,7 +533,18 @@ class ApiClient {
             radius_km: customer?.raio_padrao_km || user.radius_km || 5,
             profile_complete: user.profile_complete,
             created_at: user.created_at,
-            customer: customer ? { cpf: customer.cpf } : undefined,
+            customer: customer
+                ? {
+                      cpf: customer.cpf,
+                      cep: customer.cep,
+                      endereco: customer.endereco,
+                      numero: customer.numero,
+                      complemento: customer.complemento,
+                      bairro: customer.bairro,
+                      cidade: customer.cidade,
+                      estado: customer.estado,
+                  }
+                : undefined,
         };
     }
 
@@ -530,11 +566,22 @@ class ApiClient {
         });
     }
 
-    async updateLocation(lat: number, lng: number, radius_km: number = 5, cpf?: string): Promise<User> {
-        const body: any = { lat, lng, radius_km };
-        if (cpf) {
-            body.cpf = cpf;
-        }
+    async updateLocation(payload: UpdateLocationPayload): Promise<CustomerProfile> {
+        const body: any = {
+            lat: payload.lat,
+            lng: payload.lng,
+            radius_km: payload.radius_km ?? 5,
+        };
+
+        if (payload.cpf) body.cpf = payload.cpf;
+        if (payload.cep) body.cep = payload.cep;
+        if (payload.address) body.address = payload.address;
+        if (payload.number) body.number = payload.number;
+        if (payload.complement) body.complement = payload.complement;
+        if (payload.neighborhood) body.neighborhood = payload.neighborhood;
+        if (payload.city) body.city = payload.city;
+        if (payload.state) body.state = payload.state;
+
         return this.request('/me/location', {
             method: 'PUT',
             body: JSON.stringify(body),

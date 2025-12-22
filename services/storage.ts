@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { refreshAccessToken, supabase } from './supabase';
 
 const SUPABASE_URL = 'https://rkmvrfqhcleibdtlcwwh.supabase.co';
 
@@ -56,23 +56,54 @@ export async function uploadImage(
 
         console.log('[UPLOAD] Uploading to Supabase:', bucket, filePath);
 
-        // Upload to Supabase Storage with timeout
-        const uploadPromise = supabase.storage
-            .from(bucket)
-            .upload(filePath, arrayBuffer, {
-                contentType,
-                upsert: false,
-            });
+        const shouldRetryAfterRefresh = (message: string) => {
+            const lower = message.toLowerCase();
+            return (
+                lower.includes('row level security') ||
+                lower.includes('row-level security') ||
+                lower.includes('violates row-level security') ||
+                lower.includes('new row violates')
+            );
+        };
 
-        const uploadTimeout = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Upload timeout - Supabase não respondeu')), 15000)
-        );
+        const uploadOnce = async () => {
+            const uploadPromise = supabase.storage
+                .from(bucket)
+                .upload(filePath, arrayBuffer, {
+                    contentType,
+                    upsert: false,
+                });
 
-        const { data, error } = await Promise.race([uploadPromise, uploadTimeout]);
+            const uploadTimeout = new Promise<never>((_, reject) =>
+                setTimeout(
+                    () => reject(new Error('Upload timeout - Supabase não respondeu')),
+                    15000,
+                ),
+            );
+
+            return Promise.race([uploadPromise, uploadTimeout]);
+        };
+
+        // Upload to Supabase Storage with timeout (+ retry once after token refresh for RLS race)
+        let { data, error } = await uploadOnce();
+
+        if (error && shouldRetryAfterRefresh(error.message)) {
+            console.warn(
+                '[UPLOAD] RLS bloqueou o upload; tentando refresh da sessão e retry...',
+            );
+            const refreshed = await refreshAccessToken();
+            if (refreshed) {
+                ({ data, error } = await uploadOnce());
+            }
+        }
 
         if (error) {
             console.error('[UPLOAD] Supabase error:', error);
             throw new Error(`Erro ao fazer upload: ${error.message}`);
+        }
+
+        if (!data?.path) {
+            throw new Error('Erro ao fazer upload: resposta inválida do Supabase (sem path)');
         }
 
         // Get public URL

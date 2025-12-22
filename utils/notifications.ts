@@ -1,16 +1,64 @@
 import * as Device from 'expo-device';
-import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { api } from '@/services/api';
 
-// Configurar como as notificações devem ser tratadas quando o app está em foreground
-Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-    }),
-});
+type ExpoNotificationsModule = typeof import('expo-notifications');
+
+let notificationsModulePromise: Promise<ExpoNotificationsModule | null> | null = null;
+let didConfigureHandler = false;
+let didWarnExpoGo = false;
+
+const isExpoGo = () =>
+    // expo-constants >= 14: executionEnvironment === 'storeClient' in Expo Go
+    (Constants as any)?.executionEnvironment === 'storeClient';
+
+const getNotificationsModule = async (): Promise<ExpoNotificationsModule | null> => {
+    if (notificationsModulePromise) return notificationsModulePromise;
+
+    notificationsModulePromise = (async () => {
+        // Expo Go (SDK 53+) não suporta push remoto no Android/iOS.
+        // Evitamos até importar o módulo para não crashar no startup.
+        if (isExpoGo()) {
+            if (__DEV__ && !didWarnExpoGo) {
+                didWarnExpoGo = true;
+                console.warn(
+                    '[Notifications] Expo Go não suporta push remoto (SDK 53+). Use um development build (dev-client).',
+                );
+            }
+            return null;
+        }
+
+        try {
+            const mod = await import('expo-notifications');
+
+            if (!didConfigureHandler) {
+                didConfigureHandler = true;
+                mod.setNotificationHandler({
+                    handleNotification: async () => ({
+                        shouldShowAlert: true,
+                        shouldPlaySound: true,
+                        shouldSetBadge: true,
+                        shouldShowBanner: true,
+                        shouldShowList: true,
+                    }),
+                });
+            }
+
+            return mod;
+        } catch (error) {
+            if (__DEV__) {
+                console.warn(
+                    '[Notifications] expo-notifications indisponível; push desativado.',
+                    error,
+                );
+            }
+            return null;
+        }
+    })();
+
+    return notificationsModulePromise;
+};
 
 /**
  * Solicita permissões de notificação e retorna o token
@@ -20,43 +68,77 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
 
     // Apenas em dispositivos físicos (não simuladores)
     if (!Device.isDevice) {
-        console.log('Push notifications não funcionam em simuladores');
+        if (__DEV__) console.log('Push notifications não funcionam em simuladores');
         return null;
     }
 
-    // Verificar permissões atuais
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
+    const Notifications = await getNotificationsModule();
+    if (!Notifications) return null;
 
-    // Se não tiver permissão, solicitar
-    if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        finalStatus = status;
+    // Verificar permissões atuais
+    let finalStatus: string;
+    try {
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        finalStatus = existingStatus;
+
+        // Se não tiver permissão, solicitar
+        if (existingStatus !== 'granted') {
+            const { status } = await Notifications.requestPermissionsAsync();
+            finalStatus = status;
+        }
+    } catch (error) {
+        if (__DEV__) {
+            console.warn('[Notifications] Falha ao checar/solicitar permissões:', error);
+        }
+        return null;
     }
 
     // Se não conseguiu permissão, retornar null
     if (finalStatus !== 'granted') {
-        console.log('Permissão de notificação negada');
+        if (__DEV__) console.log('Permissão de notificação negada');
         return null;
     }
 
     // Obter token do Expo
     try {
-        token = (await Notifications.getExpoPushTokenAsync()).data;
-        console.log('Push token obtido:', token);
+        const projectId =
+            Constants.expoConfig?.extra?.eas?.projectId ||
+            Constants.easConfig?.projectId;
+
+        if (!projectId) {
+            if (__DEV__) {
+                console.warn(
+                    '[Notifications] EAS Project ID não configurado (app.json). Push desativado. Rode "eas init" para gerar o projectId.',
+                );
+            }
+            return null;
+        }
+
+        token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+        if (__DEV__) {
+            console.log('[Notifications] Push token obtido (redacted)');
+        }
     } catch (error) {
-        console.error('Erro ao obter push token:', error);
+        if (__DEV__) {
+            console.warn('[Notifications] Erro ao obter push token:', error);
+        }
         return null;
     }
 
     // Configurar canal de notificação para Android
     if (Platform.OS === 'android') {
-        Notifications.setNotificationChannelAsync('default', {
-            name: 'default',
-            importance: Notifications.AndroidImportance.MAX,
-            vibrationPattern: [0, 250, 250, 250],
-            lightColor: '#6366F1',
-        });
+        try {
+            await Notifications.setNotificationChannelAsync('default', {
+                name: 'default',
+                importance: Notifications.AndroidImportance.MAX,
+                vibrationPattern: [0, 250, 250, 250],
+                lightColor: '#6366F1',
+            });
+        } catch (error) {
+            if (__DEV__) {
+                console.warn('[Notifications] Falha ao configurar canal Android:', error);
+            }
+        }
     }
 
     return token;
@@ -70,7 +152,7 @@ export async function registerNotificationTokenWithBackend(): Promise<boolean> {
         const token = await registerForPushNotificationsAsync();
 
         if (!token) {
-            console.log('Não foi possível obter token de notificação');
+            if (__DEV__) console.log('Não foi possível obter token de notificação');
             return false;
         }
 
@@ -82,10 +164,10 @@ export async function registerNotificationTokenWithBackend(): Promise<boolean> {
 
         // Registrar no backend
         await api.registerNotificationToken(token, platform);
-        console.log('Token de notificação registrado no backend com sucesso');
+        if (__DEV__) console.log('Token de notificação registrado no backend com sucesso');
         return true;
     } catch (error) {
-        console.error('Erro ao registrar token de notificação:', error);
+        if (__DEV__) console.warn('Erro ao registrar token de notificação:', error);
         return false;
     }
 }
@@ -96,10 +178,10 @@ export async function registerNotificationTokenWithBackend(): Promise<boolean> {
 export async function unregisterNotificationToken(token: string): Promise<boolean> {
     try {
         await api.unregisterNotificationToken(token);
-        console.log('Token de notificação removido do backend');
+        if (__DEV__) console.log('Token de notificação removido do backend');
         return true;
     } catch (error) {
-        console.error('Erro ao remover token de notificação:', error);
+        if (__DEV__) console.warn('Erro ao remover token de notificação:', error);
         return false;
     }
 }

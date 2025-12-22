@@ -20,6 +20,14 @@ import { ActivityIndicator, Alert, Dimensions, Image, StyleSheet, Text, Touchabl
 
 const { height } = Dimensions.get('window');
 
+const safeUrlForLog = (rawUrl: string) => {
+    if (!rawUrl) return rawUrl;
+    // OAuth implicit flow returns tokens in the URL fragment (#...). Never log it.
+    const withoutHash = rawUrl.split('#')[0];
+    // Also strip query params to avoid leaking codes in other flows.
+    return withoutHash.split('?')[0];
+};
+
 export default function LoginScreen() {
     const [loading, setLoading] = useState(false);
     const [checking, setChecking] = useState(true);
@@ -301,7 +309,7 @@ export default function LoginScreen() {
                 console.log('Browser result type:', result.type);
 
                 if (result.type === 'success' && result.url) {
-                    console.log('Result URL:', result.url);
+                    console.log('Result URL:', safeUrlForLog(result.url));
 
                     const hashIndex = result.url.indexOf('#');
                     if (hashIndex !== -1) {

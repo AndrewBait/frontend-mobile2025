@@ -15,6 +15,14 @@ import {
     tryAcquireAuthSessionLock,
 } from '@/utils/redirectLock';
 
+const safeUrlForLog = (rawUrl: string | null | undefined) => {
+    if (!rawUrl) return rawUrl ?? null;
+    // OAuth implicit flow returns tokens in the URL fragment (#...). Never log it.
+    const withoutHash = String(rawUrl).split('#')[0];
+    // Also strip query params to avoid leaking codes in other flows.
+    return withoutHash.split('?')[0];
+};
+
 export default function AuthCallbackScreen() {
     const params = useLocalSearchParams();
     const url = useURL();
@@ -54,7 +62,7 @@ export default function AuthCallbackScreen() {
         const run = async () => {
             try {
                 console.log('[AuthCallback] Callback screen montado');
-                console.log('[AuthCallback] URL:', url);
+                console.log('[AuthCallback] URL:', safeUrlForLog(url));
                 console.log('[AuthCallback] Params:', Object.keys(params));
 
                 // If LoginScreen is processing the OAuth flow, do not attempt to consume the refresh token here.
@@ -115,10 +123,11 @@ export default function AuthCallbackScreen() {
     async function handleCallback(callbackUrl: string) {
         try {
             console.log('[AuthCallback] ========== INICIANDO PROCESSAMENTO ==========');
-            console.log('[AuthCallback] URL recebida:', callbackUrl);
+            console.log('[AuthCallback] URL recebida:', safeUrlForLog(callbackUrl));
             
             if (callbackUrl) {
-                console.log('[AuthCallback] URL completa (primeiros 200 chars):', callbackUrl.substring(0, 200));
+                const safe = safeUrlForLog(callbackUrl) || '';
+                console.log('[AuthCallback] URL (redigida):', String(safe).substring(0, 200));
             }
 
             if (callbackUrl) {
@@ -128,7 +137,7 @@ export default function AuthCallbackScreen() {
                 
                 if (hashIndex !== -1) {
                     const hashPart = callbackUrl.substring(hashIndex + 1);
-                    console.log('[AuthCallback] Hash part (primeiros 100 chars):', hashPart.substring(0, 100));
+                    console.log('[AuthCallback] Hash length:', hashPart.length);
                     const hashParams = new URLSearchParams(hashPart);
 
                     const accessToken = hashParams.get('access_token');
@@ -256,11 +265,31 @@ export default function AuthCallbackScreen() {
             const startTime = Date.now();
             
             const userPromise = api.getMe();
-            const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Timeout: Backend não respondeu em 15 segundos')), 15000)
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(
+                    () => reject(new Error('Timeout: Backend não respondeu em 15 segundos')),
+                    15000,
+                ),
             );
-            
-            const user = await Promise.race([userPromise, timeoutPromise]) as any;
+
+            let user: any;
+            try {
+                user = await Promise.race([userPromise, timeoutPromise]);
+            } catch (error: any) {
+                const status = error?.status ?? error?.statusCode;
+
+                // Backend can briefly return 409 in a race where two requests try to create the same user.
+                // Treat as non-fatal and recover by fetching the profile.
+                if (status === 409) {
+                    console.warn(
+                        '[AuthCallback] /me retornou 409 (race de criação). Recuperando via /me/profile...',
+                    );
+                    const profile = await api.getProfile();
+                    user = profile;
+                } else {
+                    throw error;
+                }
+            }
             const duration = Date.now() - startTime;
             
             console.log('[AuthCallback] Resposta recebida em', duration, 'ms');

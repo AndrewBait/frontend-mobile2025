@@ -45,7 +45,17 @@ export default function MerchantSalesScreen() {
                 return;
             }
             loadStores();
-        }, [session, isLoggingOut])
+
+            // FIX: ao voltar de telas (ex.: detalhes do pedido), a loja selecionada pode ser a mesma
+            // e o useEffect([selectedStore]) não dispara. Forçamos reload ao focar.
+            if (selectedStore) {
+                const timer = setTimeout(() => {
+                    loadOrders();
+                }, 350);
+
+                return () => clearTimeout(timer);
+            }
+        }, [session, isLoggingOut, selectedStore])
     );
 
     useEffect(() => {

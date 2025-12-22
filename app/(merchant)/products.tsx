@@ -34,7 +34,17 @@ export default function MerchantProductsScreen() {
                 return;
             }
             loadStores();
-        }, [session, isLoggingOut])
+
+            // FIX: ao voltar de criar/editar produto, a loja selecionada pode ser a mesma
+            // e o useEffect([selectedStore]) não dispara. Forçamos reload ao focar.
+            if (selectedStore) {
+                const timer = setTimeout(() => {
+                    loadBatches();
+                }, 350);
+
+                return () => clearTimeout(timer);
+            }
+        }, [session, isLoggingOut, selectedStore])
     );
 
     useEffect(() => {

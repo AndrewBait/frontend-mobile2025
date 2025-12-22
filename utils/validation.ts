@@ -251,13 +251,109 @@ export const fetchAddressByCEP = async (cep: string): Promise<{
         const cleaned = cep.replace(/\D/g, '');
         if (cleaned.length !== 8) return null;
 
-        const response = await fetch(`https://viacep.com.br/ws/${cleaned}/json/`);
-        const data = await response.json();
+        const fetchWithTimeout = async (url: string, timeoutMs: number) => {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                return await fetch(url, { signal: controller.signal });
+            } finally {
+                clearTimeout(timeout);
+            }
+        };
 
-        if (data.erro) return null;
-        return data;
+        const parseJsonResponse = async (response: Response) => {
+            const contentType = response.headers.get('content-type') || '';
+
+            // Evita crash de JSON.parse quando a API retorna HTML (ex.: página de erro/proxy).
+            if (!contentType.includes('application/json')) {
+                const text = await response.text().catch(() => '');
+                if (__DEV__) {
+                    console.warn(
+                        `[CEP] Resposta inválida (não JSON). status=${response.status} body=${text.substring(0, 120)}`,
+                    );
+                }
+                return null;
+            }
+
+            if (!response.ok) {
+                if (__DEV__) {
+                    console.warn(`[CEP] Erro HTTP. status=${response.status}`);
+                }
+                return null;
+            }
+
+            try {
+                return await response.json();
+            } catch (err) {
+                if (__DEV__) {
+                    console.warn('[CEP] Falha ao parsear JSON:', err);
+                }
+                return null;
+            }
+        };
+
+        const isAbortError = (error: unknown) =>
+            typeof error === 'object' &&
+            error !== null &&
+            // React Native / fetch usa "AbortError"
+            'name' in error &&
+            (error as any).name === 'AbortError';
+
+        // 1) ViaCEP (primário)
+        try {
+            const response = await fetchWithTimeout(
+                `https://viacep.com.br/ws/${cleaned}/json/`,
+                5000,
+            );
+            const data = await parseJsonResponse(response);
+
+            if (data && !data.erro) {
+                return {
+                    logradouro: data.logradouro || '',
+                    bairro: data.bairro || '',
+                    localidade: data.localidade || '',
+                    uf: data.uf || '',
+                    erro: data.erro,
+                };
+            }
+
+            // ViaCEP retorna { erro: true } quando o CEP não existe.
+            if (data && data.erro) {
+                return null;
+            }
+        } catch (error) {
+            if (__DEV__ && !isAbortError(error)) {
+                console.warn('[ViaCEP] Falha ao buscar CEP:', error);
+            }
+        }
+
+        // 2) Fallback: BrasilAPI
+        try {
+            const response = await fetchWithTimeout(
+                `https://brasilapi.com.br/api/cep/v1/${cleaned}`,
+                5000,
+            );
+            const data = await parseJsonResponse(response);
+
+            if (data && typeof data === 'object') {
+                return {
+                    logradouro: data.street || '',
+                    bairro: data.neighborhood || '',
+                    localidade: data.city || '',
+                    uf: data.state || '',
+                };
+            }
+        } catch (error) {
+            if (__DEV__ && !isAbortError(error)) {
+                console.warn('[BrasilAPI] Falha ao buscar CEP:', error);
+            }
+        }
+
+        return null;
     } catch (error) {
-        console.error('Error fetching CEP:', error);
+        if (__DEV__) {
+            console.warn('Error fetching CEP:', error);
+        }
         return null;
     }
 };

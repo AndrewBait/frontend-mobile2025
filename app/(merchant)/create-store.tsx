@@ -2,8 +2,10 @@ import { GradientBackground } from '@/components/GradientBackground';
 import { SelectInput } from '@/components/SelectInput';
 import { Colors } from '@/constants/Colors';
 import { DesignTokens } from '@/constants/designTokens';
+import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/services/api';
 import { uploadStoreProfile } from '@/services/storage';
+import { refreshAccessToken } from '@/services/supabase';
 import {
     calculatePickupDeadline,
     fetchAddressByCEP,
@@ -63,6 +65,7 @@ export default function CreateStoreScreen() {
     const isEditMode = !!params.editStoreId;
     const editStoreId = params.editStoreId;
     const pendingRole = params.pendingRole;
+    const { refreshUser } = useAuth();
 
     const [loading, setLoading] = useState(false);
     const [loadingStore, setLoadingStore] = useState(isEditMode);
@@ -369,6 +372,9 @@ export default function CreateStoreScreen() {
                     console.log('Setting store_owner role...');
                     await api.updateProfile({ role: 'store_owner' });
                     console.log('Role saved');
+                    // Storage policies usam app_metadata.role no JWT; após mudar o role no backend,
+                    // precisamos renovar o token para aplicar a claim imediatamente.
+                    await refreshAccessToken();
                 }
 
                 // CREATE MODE - CreateStoreDto espera campos em inglês
@@ -400,6 +406,8 @@ export default function CreateStoreScreen() {
 
                 const createdStore = await Promise.race([createPromise, timeoutPromise]);
                 console.log('Store created successfully:', createdStore?.id);
+
+                await refreshUser();
 
                 // Only upload logo AFTER store is created successfully
                 let uploadedLogoUrl: string | undefined;
