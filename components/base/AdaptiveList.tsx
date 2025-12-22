@@ -1,4 +1,5 @@
 import React from 'react';
+import { FlashList } from '@shopify/flash-list';
 import {
     FlatList,
     FlatListProps,
@@ -12,13 +13,6 @@ type AdaptiveListProps<TItem> = FlatListProps<TItem> & {
     estimatedItemSize?: number;
     style?: StyleProp<ViewStyle>;
 };
-
-let FlashList: any = null;
-try {
-    FlashList = require('@shopify/flash-list').FlashList;
-} catch {
-    FlashList = null;
-}
 
 const isFlashListSupported = (): boolean => {
     try {
@@ -34,7 +28,6 @@ export function AdaptiveList<TItem>(props: AdaptiveListProps<TItem>) {
     const numColumns = Number(rest?.numColumns || 0);
     const hasColumnWrapperStyle = rest?.columnWrapperStyle != null;
     const canUseFlashList =
-        FlashList &&
         isFlashListSupported() &&
         !hasColumnWrapperStyle &&
         (numColumns <= 1);

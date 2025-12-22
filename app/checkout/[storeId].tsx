@@ -48,6 +48,7 @@ export default function CheckoutScreen() {
     const [mockConfirming, setMockConfirming] = useState(false);
     const [store, setStore] = useState<Store | null>(null);
     const [storeError, setStoreError] = useState<string | null>(null);
+    const loadStoreAndCartRef = React.useRef<() => Promise<void>>(async () => {});
 
     const getBatchFromItem = (item: CartItem): Batch | null => item.batch || item.product_batches || null;
 
@@ -55,9 +56,9 @@ export default function CheckoutScreen() {
         if (!isProfileComplete) {
             setShowProfileModal(true);
         } else {
-            loadStoreAndCart();
+            void loadStoreAndCartRef.current();
         }
-    }, [isProfileComplete, storeId]);
+    }, [isProfileComplete, storeId, loadStoreAndCartRef]);
 
     const loadStoreAndCart = async () => {
         try {
@@ -85,6 +86,7 @@ export default function CheckoutScreen() {
             setLoading(false);
         }
     };
+    loadStoreAndCartRef.current = loadStoreAndCart;
 
     useEffect(() => {
         if (!order?.id) return;
@@ -433,7 +435,7 @@ const PixSuccessView: React.FC<{
     useEffect(() => {
         scale.value = withSpring(1, { damping: 15, stiffness: 150 });
         opacity.value = withTiming(1, { duration: DesignTokens.animations.normal });
-    }, []);
+    }, [opacity, scale]);
 
     const animatedContainerStyle = useAnimatedStyle(() => ({
         opacity: opacity.value,

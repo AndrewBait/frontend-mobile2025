@@ -51,7 +51,7 @@ const FavoriteItem = memo<{
             translateX.value = withSpring(0, { damping: 18, stiffness: 200 });
         }, delay);
         return () => clearTimeout(timeoutId);
-    }, [index]);
+    }, [index, opacity, translateX]);
 
     const animatedStyle = useAnimatedStyle(() => ({
         opacity: opacity.value,
@@ -228,7 +228,7 @@ export default function FavoritesScreen() {
         },
     });
 
-    const handleRemoveFavorite = async (favoriteId: string) => {
+    const handleRemoveFavorite = useCallback(async (favoriteId: string) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         try {
             await removeFavoriteMutation.mutateAsync(favoriteId);
@@ -237,9 +237,9 @@ export default function FavoritesScreen() {
             console.error('Error removing favorite:', error);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         }
-    };
+    }, [removeFavoriteMutation]);
 
-    const handleAddToCart = async (favorite: Favorite) => {
+    const handleAddToCart = useCallback(async (favorite: Favorite) => {
         const batchId = favorite.product_batch_id;
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         // ATUALIZAÇÃO OTIMISTA: Atualizar badge imediatamente
@@ -332,7 +332,7 @@ export default function FavoritesScreen() {
             console.error('[Favorites] Erro ao adicionar ao carrinho:', errorMessage);
             Alert.alert('Erro', errorMessage);
         }
-    };
+    }, [incrementCartCount, updateCartCache]);
 
     const favorites = favoritesQuery.data ?? [];
     const loading = favoritesQuery.isLoading;

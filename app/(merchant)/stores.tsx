@@ -23,6 +23,7 @@ export default function MerchantStoresScreen() {
     const [stores, setStores] = useState<Store[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const loadStoresRef = React.useRef<() => Promise<void>>(async () => {});
 
     useFocusEffect(
         useCallback(() => {
@@ -30,8 +31,8 @@ export default function MerchantStoresScreen() {
                 setLoading(false);
                 return;
             }
-            loadStores();
-        }, [session, isLoggingOut])
+            void loadStoresRef.current();
+        }, [session, isLoggingOut, loadStoresRef])
     );
 
     const loadStores = async () => {
@@ -53,6 +54,7 @@ export default function MerchantStoresScreen() {
             setRefreshing(false);
         }
     };
+    loadStoresRef.current = loadStores;
 
     const onRefresh = () => {
         if (isLoggingOut || !session) return;

@@ -63,7 +63,7 @@ export const AnimatedBatchCard: React.FC<AnimatedBatchCardProps> = memo(({
             translateY.value = withSpring(0, { damping: 18, stiffness: 200 });
         }, delay);
         return () => clearTimeout(timeoutId);
-    }, [index]);
+    }, [index, opacity, scale, translateY]);
 
     const animatedStyle = useAnimatedStyle(() => ({
         transform: [
@@ -76,12 +76,12 @@ export const AnimatedBatchCard: React.FC<AnimatedBatchCardProps> = memo(({
     const handlePressIn = useCallback(() => {
         'worklet';
         pressScale.value = withSpring(0.98, { damping: 15, stiffness: 400 });
-    }, []);
+    }, [pressScale]);
 
     const handlePressOut = useCallback(() => {
         'worklet';
         pressScale.value = withSpring(1, { damping: 15, stiffness: 300 });
-    }, []);
+    }, [pressScale]);
 
     // Extract data (memoizado para evitar recálculo)
     const productData = useMemo(() => batch.products || batch.product, [batch.products, batch.product]);
@@ -146,7 +146,7 @@ export const AnimatedBatchCard: React.FC<AnimatedBatchCardProps> = memo(({
         };
     }, [batch.expiration_date, batch.data_vencimento]);
 
-    const { daysToExpire, expirationText, isUrgent, isExpiringSoon, isExpired } = expirationInfo;
+    const { expirationText, isUrgent, isExpiringSoon, isExpired } = expirationInfo;
 
     // URIs de imagem (memoizado)
     const imageUri = useMemo(() =>

@@ -37,6 +37,8 @@ export default function MerchantSalesScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'pending_payment' | 'picked_up' | 'cancelled'>('paid');
+    const loadStoresRef = React.useRef<() => Promise<void>>(async () => {});
+    const loadOrdersRef = React.useRef<() => Promise<void>>(async () => {});
 
     useFocusEffect(
         useCallback(() => {
@@ -44,25 +46,25 @@ export default function MerchantSalesScreen() {
                 setLoading(false);
                 return;
             }
-            loadStores();
+            void loadStoresRef.current();
 
             // FIX: ao voltar de telas (ex.: detalhes do pedido), a loja selecionada pode ser a mesma
             // e o useEffect([selectedStore]) não dispara. Forçamos reload ao focar.
             if (selectedStore) {
                 const timer = setTimeout(() => {
-                    loadOrders();
+                    void loadOrdersRef.current();
                 }, 350);
 
                 return () => clearTimeout(timer);
             }
-        }, [session, isLoggingOut, selectedStore])
+        }, [session, isLoggingOut, selectedStore, loadOrdersRef, loadStoresRef])
     );
 
     useEffect(() => {
         if (selectedStore && !isLoggingOut && session) {
-            loadOrders();
+            void loadOrdersRef.current();
         }
-    }, [selectedStore, isLoggingOut, session]);
+    }, [selectedStore, isLoggingOut, session, loadOrdersRef]);
 
     const loadStores = async () => {
         if (isLoggingOut || !session) {
@@ -84,6 +86,7 @@ export default function MerchantSalesScreen() {
             setLoading(false);
         }
     };
+    loadStoresRef.current = loadStores;
 
     const loadOrders = async () => {
         if (!selectedStore || isLoggingOut || !session) return;
@@ -98,6 +101,7 @@ export default function MerchantSalesScreen() {
             setRefreshing(false);
         }
     };
+    loadOrdersRef.current = loadOrders;
 
     const onRefresh = () => {
         if (isLoggingOut || !session) return;

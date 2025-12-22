@@ -26,6 +26,8 @@ export default function MerchantProductsScreen() {
     const [selectedStore, setSelectedStore] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const loadStoresRef = React.useRef<() => Promise<void>>(async () => {});
+    const loadBatchesRef = React.useRef<() => Promise<void>>(async () => {});
 
     useFocusEffect(
         useCallback(() => {
@@ -33,25 +35,25 @@ export default function MerchantProductsScreen() {
                 setLoading(false);
                 return;
             }
-            loadStores();
+            void loadStoresRef.current();
 
             // FIX: ao voltar de criar/editar produto, a loja selecionada pode ser a mesma
             // e o useEffect([selectedStore]) não dispara. Forçamos reload ao focar.
             if (selectedStore) {
                 const timer = setTimeout(() => {
-                    loadBatches();
+                    void loadBatchesRef.current();
                 }, 350);
 
                 return () => clearTimeout(timer);
             }
-        }, [session, isLoggingOut, selectedStore])
+        }, [session, isLoggingOut, selectedStore, loadBatchesRef, loadStoresRef])
     );
 
     useEffect(() => {
         if (selectedStore && !isLoggingOut && session) {
-            loadBatches();
+            void loadBatchesRef.current();
         }
-    }, [selectedStore, isLoggingOut, session]);
+    }, [selectedStore, isLoggingOut, session, loadBatchesRef]);
 
     const loadStores = async () => {
         if (isLoggingOut || !session) {
@@ -73,6 +75,7 @@ export default function MerchantProductsScreen() {
             setLoading(false);
         }
     };
+    loadStoresRef.current = loadStores;
 
     const loadBatches = async () => {
         if (!selectedStore || isLoggingOut || !session) return;
@@ -87,6 +90,7 @@ export default function MerchantProductsScreen() {
             setRefreshing(false);
         }
     };
+    loadBatchesRef.current = loadBatches;
 
     const onRefresh = () => {
         if (isLoggingOut || !session) return;

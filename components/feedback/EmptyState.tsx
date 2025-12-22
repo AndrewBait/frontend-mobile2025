@@ -47,7 +47,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
                 true
             );
         }
-    }, [animated]);
+    }, [animated, pulse]);
 
     const animatedStyle = useAnimatedStyle(() => {
         if (!animated) return {};

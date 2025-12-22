@@ -1,7 +1,7 @@
 import { useURL } from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useRef } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { GradientBackground } from '@/components/GradientBackground';
 import { Colors } from '@/constants/Colors';
 import { API_BASE_URL } from '@/constants/config';
@@ -29,6 +29,8 @@ export default function AuthCallbackScreen() {
     const isHandlingCallback = useRef(false);
     const isRedirecting = useRef(false);
     const lastProcessedUrl = useRef<string | null>(null);
+    const handleCallbackRef = useRef<(callbackUrl: string) => Promise<void>>(async () => {});
+    const [redirectError, setRedirectError] = useState<string | null>(null);
 
     useEffect(() => {
         // This callback screen is mainly for deep links
@@ -105,7 +107,7 @@ export default function AuthCallbackScreen() {
                 }
 
                 try {
-                    await handleCallback(url);
+                    await handleCallbackRef.current(url);
                 } finally {
                     releaseAuthSessionLock(lockOwner);
                 }
@@ -118,7 +120,7 @@ export default function AuthCallbackScreen() {
         };
 
         run();
-    }, [url]);
+    }, [url, params, handleCallbackRef]);
 
     async function handleCallback(callbackUrl: string) {
         try {
@@ -245,6 +247,7 @@ export default function AuthCallbackScreen() {
             router.replace('/');
         }
     }
+    handleCallbackRef.current = handleCallback;
 
     async function redirectToApp() {
         // Prevent multiple simultaneous calls (check both local and global flags)
@@ -255,6 +258,7 @@ export default function AuthCallbackScreen() {
         }
 
         try {
+            setRedirectError(null);
             isRedirecting.current = true;
             setGlobalRedirectInProgress(true);
             console.log('[AuthCallback] ========== REDIRECIONANDO PARA APP ==========');
@@ -397,31 +401,63 @@ export default function AuthCallbackScreen() {
             console.error('[AuthCallback] Tipo do erro:', error?.constructor?.name);
             console.error('[AuthCallback] Mensagem:', error?.message);
             console.error('[AuthCallback] Stack:', error?.stack);
-            
-            // Check if it's a 500 error which usually means user doesn't exist in backend
-            const isInternalServerError = error?.message?.includes('Internal server error') || 
-                                         error?.message?.includes('API Error: 500');
-            const isTimeout = error?.message?.includes('Timeout') || error?.message?.includes('Failed to fetch');
-            
-            if (isTimeout) {
-                console.error('[AuthCallback] ⚠️ TIMEOUT: Backend não está respondendo!');
-                console.error('[AuthCallback] Verifique se o backend está rodando em:', API_BASE_URL);
-                console.log('[AuthCallback] Redirecionando para seleção de role devido ao timeout');
-                router.replace('/select-role');
-            } else if (isInternalServerError) {
-                // 500 error usually means user doesn't exist in backend (no role yet)
-                console.log('[AuthCallback] ⚠️ Usuário não existe no backend (provavelmente sem role)');
-                console.log('[AuthCallback] Redirecionando para seleção de role');
-                router.replace('/select-role');
-            } else {
-                // Other errors - redirect to role selection
-                console.log('[AuthCallback] Redirecionando para seleção de role devido ao erro');
-                router.replace('/select-role');
+
+            const message = String(error?.message || '');
+            const status = error?.status ?? error?.statusCode;
+            const isNetworkError =
+                message.includes('Network request failed') ||
+                message.includes('Failed to fetch') ||
+                error?.constructor?.name === 'TypeError';
+            const isTimeout = message.includes('Timeout') || message.includes('timeout');
+
+            // Se o backend estiver indisponível, não faz sentido mandar para seleção de role (que também depende do backend).
+            if (isNetworkError || isTimeout) {
+                setRedirectError(
+                    `Não foi possível conectar no backend (${API_BASE_URL}). Verifique se o servidor está rodando e se o dispositivo está na mesma rede.`,
+                );
+                return;
             }
+
+            // Erros de auth: manda para login
+            if (status === 401) {
+                setRedirectError('Sua sessão expirou. Faça login novamente.');
+                router.replace('/');
+                return;
+            }
+
+            // Outros erros: manter na tela com mensagem amigável
+            setRedirectError(
+                message ? `Não foi possível finalizar o login: ${message}` : 'Não foi possível finalizar o login.',
+            );
         } finally {
             isRedirecting.current = false;
             setGlobalRedirectInProgress(false);
         }
+    }
+
+    if (redirectError) {
+        return (
+            <GradientBackground>
+                <View style={styles.container}>
+                    <Text style={styles.text}>Falha ao finalizar o login</Text>
+                    <Text style={styles.errorText}>{redirectError}</Text>
+                    <TouchableOpacity
+                        onPress={() => void redirectToApp()}
+                        activeOpacity={0.8}
+                        style={styles.retryButton}
+                    >
+                        <Text style={styles.retryText}>Tentar novamente</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={() => router.replace('/')}
+                        activeOpacity={0.8}
+                        style={styles.backButton}
+                    >
+                        <Text style={styles.backText}>Voltar</Text>
+                    </TouchableOpacity>
+                </View>
+            </GradientBackground>
+        );
     }
 
     return (
@@ -444,5 +480,36 @@ const styles = StyleSheet.create({
     text: {
         color: Colors.textSecondary,
         fontSize: 16,
+    },
+    errorText: {
+        color: Colors.textSecondary,
+        fontSize: 14,
+        textAlign: 'center',
+        paddingHorizontal: 24,
+        lineHeight: 20,
+    },
+    retryButton: {
+        marginTop: 12,
+        backgroundColor: Colors.primary,
+        paddingVertical: 12,
+        paddingHorizontal: 18,
+        borderRadius: 12,
+    },
+    retryText: {
+        color: Colors.text,
+        fontWeight: '700',
+    },
+    backButton: {
+        marginTop: 10,
+        backgroundColor: Colors.glass,
+        borderWidth: 1,
+        borderColor: Colors.glassBorder,
+        paddingVertical: 12,
+        paddingHorizontal: 18,
+        borderRadius: 12,
+    },
+    backText: {
+        color: Colors.text,
+        fontWeight: '600',
     },
 });

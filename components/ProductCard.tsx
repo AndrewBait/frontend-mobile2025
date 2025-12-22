@@ -48,7 +48,6 @@ interface ProductCardProps {
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2; // 2 colunas com margin
-const CARD_WIDTH_FULL = width - 32; // 1 coluna
 
 const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
 

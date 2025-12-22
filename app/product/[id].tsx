@@ -36,6 +36,7 @@ export default function ProductDetailScreen() {
     const [loading, setLoading] = useState(true);
     const [optimisticIsFavorite, setOptimisticIsFavorite] = useState<boolean | null>(null);
     const [quantity, setQuantity] = useState(1);
+    const loadBatchRef = React.useRef<() => Promise<void>>(async () => {});
 
     const favoritesEnabled = Boolean(session && user && user.role === 'customer' && id);
 
@@ -111,9 +112,9 @@ export default function ProductDetailScreen() {
 
     useEffect(() => {
         if (id) {
-            loadBatch();
+            void loadBatchRef.current();
         }
-    }, [id]);
+    }, [id, loadBatchRef]);
 
     const loadBatch = async () => {
         try {
@@ -127,6 +128,7 @@ export default function ProductDetailScreen() {
             setLoading(false);
         }
     };
+    loadBatchRef.current = loadBatch;
 
     const handleToggleFavorite = async () => {
         try {

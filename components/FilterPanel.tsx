@@ -16,11 +16,6 @@ import Animated, {
     withTiming,
 } from 'react-native-reanimated';
 
-interface FilterChip {
-    label: string;
-    value: string | number;
-}
-
 interface FilterPanelProps {
     isOpen: boolean;
     onToggle: () => void;
@@ -86,7 +81,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = React.memo(({
             const timeout = setTimeout(() => setShouldRender(false), 150);
             return () => clearTimeout(timeout);
         }
-    }, [isOpen]);
+    }, [isOpen, height, opacity]);
 
     const animatedStyle = useAnimatedStyle(() => ({
         maxHeight: height.value === 1 ? 1000 : 0,

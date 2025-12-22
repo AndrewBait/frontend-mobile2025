@@ -32,6 +32,7 @@ export default function LoginScreen() {
     const [loading, setLoading] = useState(false);
     const [checking, setChecking] = useState(true);
     const isProcessingLoginRef = React.useRef(false);
+    const checkExistingSessionRef = React.useRef<() => Promise<void>>(async () => {});
     const { session } = useAuth();
 
     // Monitor auth context changes - this ensures LoginScreen responds to logout
@@ -51,12 +52,12 @@ export default function LoginScreen() {
             console.log('🔵 [LoginScreen] Session detected in context, but waiting for login process to complete...');
             // Don't auto-redirect here - let the login process handle it
         }
-    }, [session]);
+    }, [session, checking, loading]);
 
     useEffect(() => {
         console.log('🔵 [LoginScreen] Component mounted - checking session...');
-        checkExistingSession();
-    }, []);
+        void checkExistingSessionRef.current();
+    }, [checkExistingSessionRef]);
 
     // Log every render
     console.log('🔵 [LoginScreen] RENDER - checking:', checking, 'loading:', loading, 'hasSession:', !!session);
@@ -99,6 +100,7 @@ export default function LoginScreen() {
             }
         }
     };
+    checkExistingSessionRef.current = checkExistingSession;
 
     const redirectToApp = async () => {
         // Prevent multiple simultaneous calls (check both local and global flags)
@@ -226,26 +228,29 @@ export default function LoginScreen() {
             console.error('[LoginScreen] Mensagem:', error?.message);
             console.error('[LoginScreen] Stack:', error?.stack);
             
-            // Check if it's a 500 error which usually means user doesn't exist in backend
-            const isInternalServerError = error?.message?.includes('Internal server error') || 
-                                         error?.message?.includes('API Error: 500');
-            const isTimeout = error?.message?.includes('Timeout') || error?.message?.includes('Failed to fetch');
-            
-            if (isTimeout) {
-                console.error('[LoginScreen] ⚠️ Backend não está respondendo!');
-                console.error('[LoginScreen] Verifique se está rodando em:', API_BASE_URL);
-                console.log('[LoginScreen] Redirecionando para seleção de role devido ao timeout');
-                router.replace('/select-role');
-            } else if (isInternalServerError) {
-                // 500 error usually means user doesn't exist in backend (no role yet)
-                console.log('[LoginScreen] ⚠️ Usuário não existe no backend (provavelmente sem role)');
-                console.log('[LoginScreen] Redirecionando para seleção de role');
-                router.replace('/select-role');
-            } else {
-                // Other errors - redirect to role selection
-                console.log('[LoginScreen] Redirecionando para seleção de role devido ao erro');
-                router.replace('/select-role');
+            const message = String(error?.message || '');
+            const status = error?.status ?? error?.statusCode;
+            const isNetworkError =
+                message.includes('Network request failed') ||
+                message.includes('Failed to fetch') ||
+                error?.constructor?.name === 'TypeError';
+            const isTimeout = message.includes('Timeout') || message.includes('timeout');
+
+            // Se o backend estiver indisponível, não redireciona para seleção de role (também depende do backend).
+            if (isNetworkError || isTimeout) {
+                Alert.alert(
+                    'Servidor indisponível',
+                    `Não foi possível conectar no backend (${API_BASE_URL}).\n\n- Verifique se o servidor NestJS está rodando\n- Confirme se o celular está na mesma rede Wi‑Fi\n- Em emulador Android, use 10.0.2.2 em vez do IP local`,
+                );
+                return;
             }
+
+            if (status === 401) {
+                Alert.alert('Sessão expirada', 'Faça login novamente.');
+                return;
+            }
+
+            Alert.alert('Erro', message || 'Não foi possível entrar. Tente novamente.');
             // Reset flags in error cases too
             isProcessingLoginRef.current = false;
             setGlobalRedirectInProgress(false);

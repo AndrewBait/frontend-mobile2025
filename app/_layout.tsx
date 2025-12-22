@@ -7,6 +7,25 @@ import { ToastHost } from '@/components/feedback/ToastHost';
 import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import React, { useEffect } from 'react';
 import { AppState } from 'react-native';
+import * as Sentry from 'sentry-expo';
+
+// Observabilidade (Sentry) - opcional
+// Configure `EXPO_PUBLIC_SENTRY_DSN` via `.env`/EAS Secrets.
+const sentryDsn = process.env.EXPO_PUBLIC_SENTRY_DSN;
+if (sentryDsn) {
+  Sentry.init({
+    dsn: sentryDsn,
+    enableInExpoDevelopment: false,
+    debug: __DEV__,
+    environment:
+      process.env.EXPO_PUBLIC_SENTRY_ENVIRONMENT ||
+      process.env.NODE_ENV ||
+      'development',
+    tracesSampleRate: Number.parseFloat(
+      process.env.EXPO_PUBLIC_SENTRY_TRACES_SAMPLE_RATE || '0',
+    ),
+  });
+}
 
 // Segurança: evita vazamento de dados sensíveis em logs de produção.
 if (!__DEV__) {

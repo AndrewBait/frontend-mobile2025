@@ -92,15 +92,6 @@ export const Input: React.FC<InputProps> = ({
 
     // Animated border style
     const animatedContainerStyle = useAnimatedStyle(() => {
-        const borderColor = error
-            ? Colors.error
-            : interpolate(
-                focusAnimation.value,
-                [0, 1],
-                [Colors.border.charCodeAt(0), Colors.primary.charCodeAt(0)]
-            ) ? (isFocused ? Colors.primary : Colors.border)
-            : Colors.border;
-
         return {
             borderColor: error ? Colors.error : isFocused ? Colors.primary : Colors.border,
             borderWidth: isFocused ? 2 : 1.5,

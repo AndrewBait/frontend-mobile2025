@@ -23,19 +23,21 @@ export default function OrderDetailScreen() {
     const insets = useSafeAreaInsets();
     const screenPaddingTop = insets.top + DesignTokens.spacing.md;
     const [order, setOrder] = useState<Order | null>(null);
+    const orderStatus = order?.status;
     const [loading, setLoading] = useState(true);
     const [pixLoading, setPixLoading] = useState(false);
     const [pixCode, setPixCode] = useState<string | null>(null);
     const [pixQrCodeImage, setPixQrCodeImage] = useState<string | null>(null);
+    const loadOrderRef = React.useRef<() => Promise<void>>(async () => {});
 
     useEffect(() => {
         if (id) {
-            loadOrder();
+            void loadOrderRef.current();
         }
-    }, [id]);
+    }, [id, loadOrderRef]);
 
     useEffect(() => {
-        if (!id || !order || order.status !== 'pending_payment') return;
+        if (!id || orderStatus !== 'pending_payment') return;
 
         let isMounted = true;
         const interval = setInterval(async () => {
@@ -52,7 +54,7 @@ export default function OrderDetailScreen() {
             isMounted = false;
             clearInterval(interval);
         };
-    }, [id, order?.status]);
+    }, [id, orderStatus]);
 
     const loadOrder = async () => {
         try {
@@ -68,6 +70,7 @@ export default function OrderDetailScreen() {
             setLoading(false);
         }
     };
+    loadOrderRef.current = loadOrder;
 
     const loadPix = async () => {
         if (!id) return;

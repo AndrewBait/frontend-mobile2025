@@ -47,6 +47,7 @@ export default function MerchantDashboard() {
     });
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const loadDataRef = React.useRef<() => Promise<void>>(async () => {});
 
     useFocusEffect(
         useCallback(() => {
@@ -56,8 +57,8 @@ export default function MerchantDashboard() {
                 setLoading(false);
                 return;
             }
-            loadData();
-        }, [session, isLoggingOut])
+            void loadDataRef.current();
+        }, [session, isLoggingOut, loadDataRef])
     );
 
     const loadData = async () => {
@@ -117,6 +118,7 @@ export default function MerchantDashboard() {
             setRefreshing(false);
         }
     };
+    loadDataRef.current = loadData;
 
     const onRefresh = () => {
         setRefreshing(true);

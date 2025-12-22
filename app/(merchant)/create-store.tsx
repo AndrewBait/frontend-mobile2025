@@ -66,6 +66,7 @@ export default function CreateStoreScreen() {
     const editStoreId = params.editStoreId;
     const pendingRole = params.pendingRole;
     const { refreshUser } = useAuth();
+    const loadExistingDataRef = React.useRef<() => Promise<void>>(async () => {});
 
     const [loading, setLoading] = useState(false);
     const [loadingStore, setLoadingStore] = useState(isEditMode);
@@ -92,11 +93,11 @@ export default function CreateStoreScreen() {
 
     useEffect(() => {
         if (isEditMode && editStoreId) {
-            loadExistingData();
+            void loadExistingDataRef.current();
         } else {
             setLoadingStore(false);
         }
-    }, [isEditMode, editStoreId]);
+    }, [isEditMode, editStoreId, loadExistingDataRef]);
 
     const loadExistingData = async () => {
         if (!editStoreId) return;
@@ -157,6 +158,7 @@ export default function CreateStoreScreen() {
             setLoadingStore(false);
         }
     };
+    loadExistingDataRef.current = loadExistingData;
 
     const pickImage = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();

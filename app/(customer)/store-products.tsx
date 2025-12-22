@@ -45,6 +45,8 @@ export default function StoreProductsScreen() {
     const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
     const loadStoresListRequestIdRef = useRef(0);
     const loadStoreDataRequestIdRef = useRef(0);
+    const loadStoresListRef = useRef<(reset?: boolean) => Promise<void>>(async () => {});
+    const loadStoreDataRef = useRef<() => Promise<void>>(async () => {});
     
     // Paginação
     const [page, setPage] = useState(1);
@@ -54,20 +56,20 @@ export default function StoreProductsScreen() {
     useEffect(() => {
         if (storeId) {
             setViewMode('store');
-            loadStoreData();
+            void loadStoreDataRef.current();
         } else {
             setViewMode('list');
-            getLocation();
-            loadStoresList(true);
+            void getLocation();
+            void loadStoresListRef.current(true);
         }
-    }, [storeId]);
+    }, [storeId, loadStoreDataRef, loadStoresListRef]);
 
     useEffect(() => {
         if (viewMode === 'list' && (filterRadius !== null || filterStoreType !== null || location)) {
             setPage(1); // Reset página ao mudar filtros
-            loadStoresList(true);
+            void loadStoresListRef.current(true);
         }
-    }, [filterRadius, filterStoreType, location]);
+    }, [filterRadius, filterStoreType, location, viewMode, loadStoresListRef]);
 
     const getLocation = async () => {
         try {
@@ -167,6 +169,7 @@ export default function StoreProductsScreen() {
             setRefreshing(false);
         }
     };
+    loadStoresListRef.current = loadStoresList;
 
     const loadMoreStores = () => {
         // Se ainda há lojas filtradas para mostrar, apenas incrementar página
@@ -183,8 +186,8 @@ export default function StoreProductsScreen() {
     const onRefresh = useCallback(() => {
         setRefreshing(true);
         setPage(1);
-        loadStoresList(true);
-    }, []);
+        void loadStoresListRef.current(true);
+    }, [loadStoresListRef]);
 
     // Filtrar lojas localmente (busca por nome)
     const filteredStores = useMemo(() => {
@@ -268,6 +271,7 @@ export default function StoreProductsScreen() {
             setLoading(false);
         }
     };
+    loadStoreDataRef.current = loadStoreData;
 
     const renderStore = ({ item }: { item: Store }) => {
         const logoUri =

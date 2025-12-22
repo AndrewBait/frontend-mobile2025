@@ -10,6 +10,7 @@ import { DesignTokens } from '@/constants/designTokens';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCart } from '@/contexts/CartContext';
 import { useErrorHandler } from '@/hooks/useErrorHandler';
+import { useFilteredBatches } from '@/hooks/useFilteredBatches';
 import { api, Batch } from '@/services/api';
 import { PRODUCT_CATEGORIES } from '@/utils/validation';
 import { Ionicons } from '@expo/vector-icons';
@@ -50,6 +51,8 @@ export default function VitrineScreen() {
     const [searchQuery, setSearchQuery] = useState('');
     const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
     const loadBatchesRequestIdRef = useRef(0);
+    const loadBatchesRef = useRef<(reset?: boolean) => Promise<void>>(async () => {});
+    const focusReloadKeyRef = useRef('');
     const batchesRef = useRef<Batch[]>([]);
     const hasLoadedWithLocationRef = useRef(false);
     const suppressNextLoadBatchesRef = useRef(false);
@@ -76,12 +79,17 @@ export default function VitrineScreen() {
 
     useFocusEffect(
         useCallback(() => {
+            // Mantém dependências explícitas para recarregar ao mudar filtros/localização.
+            focusReloadKeyRef.current = `${selectedCategory ?? ''}|${filterRadius ?? ''}|${
+                useLocationSearch ? '1' : '0'
+            }|${location?.lat ?? ''},${location?.lng ?? ''}`;
+
             if (suppressNextLoadBatchesRef.current) {
                 suppressNextLoadBatchesRef.current = false;
                 return;
             }
-            loadBatches(true);
-        }, [selectedCategory, location, filterRadius, useLocationSearch])
+            void loadBatchesRef.current(true);
+        }, [selectedCategory, location, filterRadius, useLocationSearch, loadBatchesRef])
     );
 
     useEffect(() => {
@@ -273,6 +281,7 @@ export default function VitrineScreen() {
             setIsRevalidating(false);
         }
     };
+    loadBatchesRef.current = loadBatches;
 
     const loadMoreBatches = () => {
         // Por enquanto, não há paginação no backend
@@ -285,100 +294,12 @@ export default function VitrineScreen() {
         }
     };
 
-    // Filter batches based on search query and filters
-    const filteredBatches = useMemo(() => {
-        console.log('[Vitrine] Iniciando filtro - Total de batches:', batches.length);
-        let filtered = batches;
-
-        // FILTRO PRINCIPAL: Remover produtos vencidos (não podem aparecer para o cliente)
-        filtered = filtered.filter(batch => {
-            const expirationDate = batch.expiration_date || batch.data_vencimento;
-            console.log('[Vitrine] Verificando batch:', {
-                id: batch.id,
-                expirationDate,
-                hasExpiration: !!expirationDate
-            });
-
-            if (!expirationDate) {
-                console.log('[Vitrine] ✅ Batch sem data de vencimento - mantendo');
-                return true; // Se não tem data, mantém (pode ser produto sem validade)
-            }
-
-            const expDate = new Date(expirationDate);
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            expDate.setHours(0, 0, 0, 0);
-            const diffTime = expDate.getTime() - today.getTime();
-            const daysToExpire = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-            console.log('[Vitrine] Cálculo de vencimento:', {
-                expDate: expDate.toISOString(),
-                today: today.toISOString(),
-                daysToExpire,
-                mantém: daysToExpire >= 0
-            });
-
-            // Só mantém se não estiver vencido (daysToExpire >= 0)
-            return daysToExpire >= 0;
-        });
-
-        console.log('[Vitrine] Após filtro de vencimento:', filtered.length);
-
-        // Filtro de busca por texto
-        if (searchQuery.trim()) {
-            const query = searchQuery.toLowerCase().trim();
-            filtered = filtered.filter(batch => {
-                // Handle both PT-BR and EN field names
-                const productData = batch.products || batch.product;
-                const productName = (productData?.nome || productData?.name || '').toLowerCase();
-                const storeName = (batch.store?.nome || batch.store?.name || '').toLowerCase();
-                const category = (productData?.categoria || productData?.category || '').toLowerCase();
-                return productName.includes(query) || storeName.includes(query) || category.includes(query);
-            });
-        }
-
-        // Filtro de preço
-        if (filterMinPrice || filterMaxPrice) {
-            filtered = filtered.filter(batch => {
-                const promoPrice = batch.promo_price ?? batch.preco_promocional ?? 0;
-                const minPrice = filterMinPrice ? parseFloat(filterMinPrice.replace(',', '.')) : 0;
-                const maxPrice = filterMaxPrice ? parseFloat(filterMaxPrice.replace(',', '.')) : Infinity;
-                return promoPrice >= minPrice && promoPrice <= maxPrice;
-            });
-        }
-
-        // Filtro de data de vencimento (dias até vencer)
-        if (filterMaxDaysToExpire !== null) {
-            filtered = filtered.filter(batch => {
-                const expirationDate = batch.expiration_date || batch.data_vencimento;
-                if (!expirationDate) return false;
-                
-                const expDate = new Date(expirationDate);
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                expDate.setHours(0, 0, 0, 0);
-                const diffTime = expDate.getTime() - today.getTime();
-                const daysToExpire = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                
-                return daysToExpire >= 0 && daysToExpire <= filterMaxDaysToExpire;
-            });
-        }
-
-        // Filtro de distância (raio) - aplicado no backend, mas podemos ordenar por distância aqui
-        // O filtro de raio já é aplicado no loadBatches através do parâmetro raio_km
-
-        console.log('[Vitrine] ========== RESULTADO FINAL ==========');
-        console.log('[Vitrine] Total de batches retornados:', batches.length);
-        console.log('[Vitrine] Total após todos os filtros:', filtered.length);
-        console.log('[Vitrine] Filtros ativos:', {
-            searchQuery: !!searchQuery,
-            filterMinPrice: !!filterMinPrice,
-            filterMaxPrice: !!filterMaxPrice,
-            filterMaxDaysToExpire: filterMaxDaysToExpire !== null
-        });
-
-        return filtered;
-    }, [batches, searchQuery, filterMinPrice, filterMaxPrice, filterMaxDaysToExpire]);
+    const filteredBatches = useFilteredBatches(batches, {
+        searchQuery,
+        minPrice: filterMinPrice,
+        maxPrice: filterMaxPrice,
+        maxDaysToExpire: filterMaxDaysToExpire,
+    });
 
     const onRefresh = () => {
         setRefreshing(true);

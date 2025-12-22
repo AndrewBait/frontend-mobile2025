@@ -86,6 +86,8 @@ export default function CreateProductScreen() {
     // Track if photos are new (local) or existing (URLs)
     const [photo1IsNew, setPhoto1IsNew] = useState(false);
     const [photo2IsNew, setPhoto2IsNew] = useState(false);
+    const loadStoresRef = React.useRef<() => Promise<void>>(async () => {});
+    const loadExistingDataRef = React.useRef<() => Promise<void>>(async () => {});
 
     // Reset form when screen focuses (for new product mode)
     const resetForm = () => {
@@ -116,11 +118,11 @@ export default function CreateProductScreen() {
     );
 
     useEffect(() => {
-        loadStores();
+        void loadStoresRef.current();
         if (isEditMode) {
-            loadExistingData();
+            void loadExistingDataRef.current();
         }
-    }, []);
+    }, [isEditMode, loadExistingDataRef, loadStoresRef]);
 
     const loadExistingData = async () => {
         if (!editProductId || !editBatchId) return;
@@ -180,6 +182,7 @@ export default function CreateProductScreen() {
             setLoadingEditData(false);
         }
     };
+    loadExistingDataRef.current = loadExistingData;
 
     const formatDisplayDate = (date: Date): string => {
         const day = date.getDate().toString().padStart(2, '0');
@@ -218,6 +221,7 @@ export default function CreateProductScreen() {
             setLoadingStores(false);
         }
     };
+    loadStoresRef.current = loadStores;
 
     const calculateDiscount = (): number => {
         const orig = parseFloat(originalPrice.replace(',', '.'));
@@ -240,16 +244,6 @@ export default function CreateProductScreen() {
 
         // Formata com 2 casas decimais e vírgula
         return reais.toFixed(2).replace('.', ',');
-    };
-
-    const formatDate = (value: string): string => {
-        const cleaned = value.replace(/\D/g, '').slice(0, 8);
-        if (cleaned.length >= 5) {
-            return `${cleaned.slice(0, 2)}/${cleaned.slice(2, 4)}/${cleaned.slice(4)}`;
-        } else if (cleaned.length >= 3) {
-            return `${cleaned.slice(0, 2)}/${cleaned.slice(2)}`;
-        }
-        return cleaned;
     };
 
     const parseDate = (dateStr: string): string => {
@@ -418,8 +412,6 @@ export default function CreateProductScreen() {
             const discountPercent = calculateDiscount();
             const isoDate = parseDate(expirationDate);
 
-            let productId = editProductId;
-
             if (isEditMode && editProductId) {
                 // UPDATE MODE - Use PUT to update existing product
                 console.log('Updating existing product:', editProductId);
@@ -484,7 +476,6 @@ export default function CreateProductScreen() {
                 });
 
                 console.log('Product created:', product.id);
-                productId = product.id;
 
                 // Upload photos
                 let photo1Url: string | undefined;
