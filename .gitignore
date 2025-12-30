@@ -38,7 +38,7 @@ yarn-error.*
 
 # local dumps/scripts (não versionar)
 *_code_full.txt
-get_rn_code.sh
+
 
 # typescript
 *.tsbuildinfo
