@@ -41,6 +41,7 @@ interface FormErrors {
     category?: string;
     originalPrice?: string;
     promoPrice?: string;
+    estimatedOriginalValue?: string;
     expirationDate?: string;
     stock?: string;
     photo1?: string;
@@ -73,6 +74,7 @@ export default function CreateProductScreen() {
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
     const [category, setCategory] = useState('');
+    const [standardCategoryBackup, setStandardCategoryBackup] = useState('');
     const [originalPrice, setOriginalPrice] = useState('');
     const [promoPrice, setPromoPrice] = useState('');
     const [expirationDate, setExpirationDate] = useState('');
@@ -80,6 +82,8 @@ export default function CreateProductScreen() {
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [stock, setStock] = useState('');
     const [isActive, setIsActive] = useState(true);
+    const [productType, setProductType] = useState<'standard' | 'surprise'>('standard');
+    const [estimatedOriginalValue, setEstimatedOriginalValue] = useState('');
     const [photo1, setPhoto1] = useState<string | null>(null);
     const [photo2, setPhoto2] = useState<string | null>(null);
 
@@ -94,12 +98,15 @@ export default function CreateProductScreen() {
         setName('');
         setDescription('');
         setCategory('');
+        setStandardCategoryBackup('');
         setOriginalPrice('');
         setPromoPrice('');
         setExpirationDate('');
         setSelectedDate(null);
         setStock('');
         setIsActive(true);
+        setProductType('standard');
+        setEstimatedOriginalValue('');
         setPhoto1(null);
         setPhoto2(null);
         setPhoto1IsNew(false);
@@ -148,12 +155,27 @@ export default function CreateProductScreen() {
                 setName(product?.nome || product?.name || '');
                 setDescription(product?.descricao || product?.description || '');
                 setCategory(product?.categoria || product?.category || '');
+                const currentType =
+                    product?.type === 'surprise' ? 'surprise' : 'standard';
+                setProductType(currentType);
+                if (currentType === 'surprise' && !(product?.categoria || product?.category)) {
+                    setCategory('Pacote Surpresa');
+                }
 
                 // Prices
                 const origPrice = batch.preco_normal_override || product?.preco_normal || 0;
                 const promPrice = batch.preco_promocional || batch.promo_price || 0;
                 setOriginalPrice(origPrice.toFixed(2).replace('.', ','));
                 setPromoPrice(promPrice.toFixed(2).replace('.', ','));
+                const estimatedValue =
+                    batch.valor_estimado_original ?? batch.estimated_original_value;
+                if (estimatedValue) {
+                    setEstimatedOriginalValue(
+                        Number(estimatedValue).toFixed(2).replace('.', ',')
+                    );
+                } else {
+                    setEstimatedOriginalValue('');
+                }
 
                 // Date
                 const expDate = batch.data_vencimento || batch.expiration_date;
@@ -168,6 +190,11 @@ export default function CreateProductScreen() {
 
                 // Active
                 setIsActive(batch.active ?? batch.is_active ?? true);
+                if (batch.status === 'sold_out') {
+                    showToast('Atenção: Este lote consta como ESGOTADO no sistema.', 'warning');
+                } else if (batch.status === 'expired') {
+                    showToast('Atenção: Este lote consta como VENCIDO.', 'error');
+                }
 
                 // Photos (these are URLs, not local files)
                 if (product?.foto1) {
@@ -262,6 +289,27 @@ export default function CreateProductScreen() {
         return '';
     };
 
+    const handleSelectProductType = (nextType: 'standard' | 'surprise') => {
+        if (nextType === productType) return;
+
+        if (nextType === 'surprise') {
+            if (category && category !== 'Pacote Surpresa') {
+                setStandardCategoryBackup(category);
+            }
+            if (!name.trim()) {
+                setName('Pacote Surpresa');
+            }
+            setCategory('Pacote Surpresa');
+        } else {
+            const restoredCategory =
+                standardCategoryBackup ||
+                (category === 'Pacote Surpresa' ? '' : category);
+            setCategory(restoredCategory);
+        }
+
+        setProductType(nextType);
+    };
+
     // Gera os próximos 30 dias para o date picker
     const getNextDays = (): Date[] => {
         const days: Date[] = [];
@@ -348,8 +396,15 @@ export default function CreateProductScreen() {
             newErrors.name = 'Máximo 80 caracteres';
         }
 
-        if (!validateRequired(category)) {
+        if (productType !== 'surprise' && !validateRequired(category)) {
             newErrors.category = 'Categoria é obrigatória';
+        }
+
+        if (productType === 'surprise' && validateRequired(estimatedOriginalValue)) {
+            const estimatedNum = parseFloat(estimatedOriginalValue.replace(',', '.'));
+            if (isNaN(estimatedNum) || estimatedNum <= 0) {
+                newErrors.estimatedOriginalValue = 'Valor estimado inválido';
+            }
         }
 
         const origPrice = parseFloat(originalPrice.replace(',', '.'));
@@ -419,6 +474,13 @@ export default function CreateProductScreen() {
             const promPrice = parseFloat(promoPrice.replace(',', '.'));
             const discountPercent = calculateDiscount();
             const isoDate = parseDate(expirationDate);
+            const estimatedValue = estimatedOriginalValue
+                ? parseFloat(estimatedOriginalValue.replace(',', '.'))
+                : undefined;
+            const normalizedCategory =
+                productType === 'surprise'
+                    ? category || 'Pacote Surpresa'
+                    : category;
 
             if (isEditMode && editProductId) {
                 // UPDATE MODE - Use PUT to update existing product
@@ -452,9 +514,10 @@ export default function CreateProductScreen() {
                 await api.updateProduct(editProductId, {
                     name: sanitizeText(name),
                     description: sanitizeText(description),
-                    category,
+                    category: normalizedCategory,
                     original_price: origPrice,
                     is_active: isActive,
+                    type: productType,
                     ...(photo1Url && { photo1: photo1Url }),
                     ...(photo2Url && { photo2: photo2Url }),
                 });
@@ -462,12 +525,20 @@ export default function CreateProductScreen() {
 
                 // Update the batch
                 if (editBatchId) {
-                    await api.updateBatch(editBatchId, {
+                    const batchPayload: any = {
                         promo_price: promPrice,
                         expiration_date: isoDate,
                         stock: parseInt(stock),
                         is_active: isActive,
-                    });
+                    };
+                    if (
+                        productType === 'surprise' &&
+                        estimatedValue !== undefined &&
+                        !isNaN(estimatedValue)
+                    ) {
+                        batchPayload.estimated_original_value = estimatedValue;
+                    }
+                    await api.updateBatch(editBatchId, batchPayload);
                     console.log('Batch updated successfully');
                 }
 
@@ -478,9 +549,10 @@ export default function CreateProductScreen() {
                 const product = await api.createProduct(selectedStore, {
                     name: sanitizeText(name),
                     description: sanitizeText(description),
-                    category,
+                    category: normalizedCategory,
                     original_price: origPrice,
                     is_active: isActive,
+                    type: productType,
                 });
 
                 console.log('Product created:', product.id);
@@ -519,7 +591,7 @@ export default function CreateProductScreen() {
                 }
 
                 // Create the batch with pricing
-                await api.createBatch(selectedStore, {
+                const batchPayload: any = {
                     product_id: product.id,
                     original_price: origPrice,
                     promo_price: promPrice,
@@ -527,7 +599,15 @@ export default function CreateProductScreen() {
                     expiration_date: isoDate,
                     stock: parseInt(stock),
                     is_active: isActive,
-                });
+                };
+                if (
+                    productType === 'surprise' &&
+                    estimatedValue !== undefined &&
+                    !isNaN(estimatedValue)
+                ) {
+                    batchPayload.estimated_original_value = estimatedValue;
+                }
+                await api.createBatch(selectedStore, batchPayload);
 
                 console.log('Batch created successfully');
 
@@ -543,6 +623,15 @@ export default function CreateProductScreen() {
             setLoading(false);
         }
     };
+
+    const daysLeft = (() => {
+        if (!expirationDate) return null;
+        const isoDate = parseDate(expirationDate);
+        if (!isoDate) return null;
+        const diffMs = new Date(isoDate).getTime() - Date.now();
+        if (Number.isNaN(diffMs)) return null;
+        return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    })();
 
     if (loadingStores || loadingEditData) {
         return (
@@ -612,6 +701,61 @@ export default function CreateProductScreen() {
                         />
                     )}
 
+                    {/* Product Type */}
+                    <Text style={styles.sectionTitle}>Tipo de Produto</Text>
+                    <View style={styles.typeSelector}>
+                        <TouchableOpacity
+                            style={[
+                                styles.typeButton,
+                                productType === 'standard' && styles.typeButtonActive,
+                            ]}
+                            onPress={() => handleSelectProductType('standard')}
+                        >
+                            <Ionicons
+                                name="cube-outline"
+                                size={18}
+                                color={productType === 'standard' ? '#FFFFFF' : Colors.text}
+                            />
+                            <Text
+                                style={[
+                                    styles.typeButtonText,
+                                    productType === 'standard' && styles.typeButtonTextActive,
+                                ]}
+                            >
+                                Produto
+                            </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[
+                                styles.typeButton,
+                                productType === 'surprise' && styles.typeButtonActive,
+                            ]}
+                            onPress={() => handleSelectProductType('surprise')}
+                        >
+                            <Ionicons
+                                name="gift-outline"
+                                size={18}
+                                color={productType === 'surprise' ? '#FFFFFF' : Colors.text}
+                            />
+                            <Text
+                                style={[
+                                    styles.typeButtonText,
+                                    productType === 'surprise' && styles.typeButtonTextActive,
+                                ]}
+                            >
+                                Pacote Surpresa
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                    {productType === 'surprise' && (
+                        <View style={styles.surpriseInfoBox}>
+                            <Ionicons name="information-circle" size={18} color={Colors.secondary} />
+                            <Text style={styles.surpriseInfoText}>
+                                Itens surpresa. Use fotos ilustrativas ou da sacola fechada.
+                            </Text>
+                        </View>
+                    )}
+
                     {/* Photos */}
                     <Text style={styles.sectionTitle}>
                         Fotos {isEditMode ? '(toque para alterar)' : '(obrigatórias)'}
@@ -655,13 +799,18 @@ export default function CreateProductScreen() {
 
                     <View style={styles.inputGroup}>
                         <Text style={styles.label}>
-                            Nome do Produto <Text style={styles.required}>*</Text>
+                            Nome do {productType === 'surprise' ? 'Pacote' : 'Produto'}{' '}
+                            <Text style={styles.required}>*</Text>
                         </Text>
                         <TextInput
                             style={[styles.input, errors.name && styles.inputError]}
                             value={name}
                             onChangeText={(v) => setName(v.slice(0, 80))}
-                            placeholder="Ex: Leite Integral 1L"
+                            placeholder={
+                                productType === 'surprise'
+                                    ? 'Ex: Sacola Surpresa Mista'
+                                    : 'Ex: Leite Integral 1L'
+                            }
                             placeholderTextColor={Colors.textMuted}
                             maxLength={80}
                         />
@@ -684,15 +833,26 @@ export default function CreateProductScreen() {
                         <Text style={styles.charCount}>{description.length}/200</Text>
                     </View>
 
-                    <SelectInput
-                        label="Categoria"
-                        value={category}
-                        options={PRODUCT_CATEGORIES}
-                        onSelect={setCategory}
-                        placeholder="Selecione a categoria..."
-                        error={errors.category}
-                        required
-                    />
+                    {productType === 'surprise' ? (
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.label}>Categoria</Text>
+                            <View style={styles.readOnlyInput}>
+                                <Text style={styles.readOnlyInputText}>
+                                    {category || 'Pacote Surpresa'}
+                                </Text>
+                            </View>
+                        </View>
+                    ) : (
+                        <SelectInput
+                            label="Categoria"
+                            value={category}
+                            options={PRODUCT_CATEGORIES}
+                            onSelect={setCategory}
+                            placeholder="Selecione a categoria..."
+                            error={errors.category}
+                            required
+                        />
+                    )}
 
                     {/* Pricing */}
                     <Text style={styles.sectionTitle}>Preços</Text>
@@ -744,6 +904,30 @@ export default function CreateProductScreen() {
                         </View>
                     )}
 
+                    {productType === 'surprise' && (
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.label}>Valor estimado original</Text>
+                            <View style={styles.priceInputContainer}>
+                                <Text style={styles.currencyLabel}>R$</Text>
+                                <TextInput
+                                    style={[
+                                        styles.input,
+                                        styles.priceInput,
+                                        errors.estimatedOriginalValue && styles.inputError,
+                                    ]}
+                                    value={estimatedOriginalValue}
+                                    onChangeText={(v) => setEstimatedOriginalValue(formatPrice(v))}
+                                    placeholder="0,00"
+                                    placeholderTextColor={Colors.textMuted}
+                                    keyboardType="decimal-pad"
+                                />
+                            </View>
+                            {errors.estimatedOriginalValue && (
+                                <Text style={styles.errorText}>{errors.estimatedOriginalValue}</Text>
+                            )}
+                        </View>
+                    )}
+
                     {/* Expiration & Stock */}
                     <Text style={styles.sectionTitle}>Validade e Estoque</Text>
 
@@ -784,7 +968,11 @@ export default function CreateProductScreen() {
                     {/* Active Toggle */}
                     <View style={styles.switchRow}>
                         <View style={styles.switchLabel}>
-                            <Ionicons name="toggle" size={20} color={Colors.primary} />
+                            <Ionicons
+                                name="toggle"
+                                size={20}
+                                color={isActive ? Colors.primary : Colors.textMuted}
+                            />
                             <Text style={styles.switchLabelText}>Produto Ativo</Text>
                         </View>
                         <Switch
@@ -794,6 +982,13 @@ export default function CreateProductScreen() {
                             thumbColor={isActive ? Colors.text : Colors.textMuted}
                         />
                     </View>
+                    {isActive &&
+                        productType === 'standard' &&
+                        (stock === '0' || (daysLeft !== null && daysLeft < 0)) && (
+                            <Text style={styles.blockedHint}>
+                                Mesmo ativo, o produto não aparecerá na vitrine (estoque zero ou vencido).
+                            </Text>
+                        )}
                     <Text style={styles.switchHint}>
                         {isActive
                             ? 'O produto ficará visível para os clientes'
@@ -1200,5 +1395,66 @@ const styles = StyleSheet.create({
         color: Colors.textSecondary,
         marginTop: 8,
         marginBottom: 16,
+    },
+    blockedHint: {
+        fontSize: 12,
+        color: Colors.error,
+        marginTop: 4,
+        fontWeight: '600',
+    },
+    typeSelector: {
+        flexDirection: 'row',
+        gap: 8,
+        backgroundColor: Colors.glass,
+        borderRadius: 14,
+        padding: 6,
+    },
+    typeButton: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingVertical: 12,
+        borderRadius: 12,
+    },
+    typeButtonActive: {
+        backgroundColor: Colors.primary,
+    },
+    typeButtonText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: Colors.text,
+    },
+    typeButtonTextActive: {
+        color: '#FFFFFF',
+    },
+    surpriseInfoBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginTop: 12,
+        padding: 12,
+        borderRadius: 12,
+        backgroundColor: Colors.secondary15,
+    },
+    surpriseInfoText: {
+        flex: 1,
+        fontSize: 13,
+        color: Colors.secondary,
+        lineHeight: 18,
+    },
+    readOnlyInput: {
+        backgroundColor: Colors.glass,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: Colors.glassBorder,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+    },
+    readOnlyInputText: {
+        fontSize: 15,
+        fontWeight: '500',
+        color: Colors.text,
     },
 });

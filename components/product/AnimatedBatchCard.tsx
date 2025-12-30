@@ -87,6 +87,7 @@ export const AnimatedBatchCard: React.FC<AnimatedBatchCardProps> = memo(({
     const productData = useMemo(() => batch.products || batch.product, [batch.products, batch.product]);
     const productName = useMemo(() => productData?.nome || productData?.name || 'Produto sem nome', [productData]);
     const productPhoto = useMemo(() => productData?.foto1 || productData?.photo1 || null, [productData]);
+    const isSurprise = useMemo(() => productData?.type === 'surprise', [productData?.type]);
 
     // Cálculo de preços (memoizado)
     const { originalPrice, promoPrice, discountPercent, savings } = useMemo(() => {
@@ -110,6 +111,10 @@ export const AnimatedBatchCard: React.FC<AnimatedBatchCardProps> = memo(({
     const storeName = useMemo(() => batch.store?.nome || batch.store?.name || 'Loja', [batch.store]);
     const storeLogo = useMemo(() => batch.store?.logo_url || null, [batch.store]);
     const storeId = useMemo(() => batch.store_id || batch.store?.id || batch.stores?.id, [batch.store_id, batch.store, batch.stores]);
+    const estimatedValue = useMemo(
+        () => batch.estimated_original_value ?? batch.valor_estimado_original,
+        [batch.estimated_original_value, batch.valor_estimado_original]
+    );
 
     // Cálculo de expiração (memoizado - cálculo pesado)
     const expirationInfo = useMemo(() => {
@@ -186,7 +191,21 @@ export const AnimatedBatchCard: React.FC<AnimatedBatchCardProps> = memo(({
                     />
                 ) : (
                     <View style={styles.imagePlaceholder}>
-                        <Ionicons name="image-outline" size={48} color={Colors.textMuted} />
+                        {isSurprise ? (
+                            <>
+                                <Ionicons name="gift" size={48} color={Colors.textMuted} />
+                                <Text style={styles.surprisePlaceholderText}>SURPRESA</Text>
+                            </>
+                        ) : (
+                            <Ionicons name="image-outline" size={48} color={Colors.textMuted} />
+                        )}
+                    </View>
+                )}
+
+                {isSurprise && (
+                    <View style={styles.surpriseBadge}>
+                        <Ionicons name="gift" size={12} color="#FFFFFF" />
+                        <Text style={styles.surpriseBadgeText}>SURPRESA</Text>
                     </View>
                 )}
 
@@ -261,6 +280,11 @@ export const AnimatedBatchCard: React.FC<AnimatedBatchCardProps> = memo(({
                             </Text>
                         </View>
                     )}
+                    {isSurprise && estimatedValue ? (
+                        <Text style={styles.estimatedValue}>
+                            Valor estimado R$ {estimatedValue.toFixed(2).replace('.', ',')}
+                        </Text>
+                    ) : null}
                 </View>
 
                 {/* Stock Info */}
@@ -379,6 +403,32 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: Colors.surfaceMuted,
+    },
+    surprisePlaceholderText: {
+        marginTop: 6,
+        fontSize: 12,
+        fontWeight: '700',
+        color: Colors.textMuted,
+        letterSpacing: 1,
+    },
+    surpriseBadge: {
+        position: 'absolute',
+        top: 60,
+        left: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: Colors.secondary,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: DesignTokens.borderRadius.md,
+        ...DesignTokens.shadows.sm,
+    },
+    surpriseBadgeText: {
+        color: '#FFFFFF',
+        fontSize: 11,
+        fontWeight: '800',
+        letterSpacing: 0.6,
     },
     discountBadge: {
         position: 'absolute',
@@ -503,6 +553,12 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontWeight: '600',
         color: Colors.savings,
+    },
+    estimatedValue: {
+        marginTop: 6,
+        fontSize: 12,
+        fontWeight: '600',
+        color: Colors.textSecondary,
     },
 
     // ========== STOCK ==========

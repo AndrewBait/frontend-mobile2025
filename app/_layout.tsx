@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { CartProvider } from '@/contexts/CartContext';
 import { SessionExpiredModalHost } from '@/components/feedback/SessionExpiredModalHost';
 import { ToastHost } from '@/components/feedback/ToastHost';
+import { AppErrorBoundary } from '@/components/feedback/AppErrorBoundary';
 import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import React, { useEffect } from 'react';
 import { AppState } from 'react-native';
@@ -90,10 +91,12 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <CartProvider>
-          <StatusBar style="light" />
-          <SessionExpiredModalHost />
-          <ToastHost />
-          <NavigationStack />
+          <AppErrorBoundary>
+            <StatusBar style="light" />
+            <SessionExpiredModalHost />
+            <ToastHost />
+            <NavigationStack />
+          </AppErrorBoundary>
         </CartProvider>
       </AuthProvider>
     </QueryClientProvider>

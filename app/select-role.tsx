@@ -7,7 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function SelectRoleScreen() {
-    const [loading, setLoading] = useState<'customer' | 'merchant' | null>(null);
+    const [loading, setLoading] = useState<'customer' | 'store_owner' | null>(null);
     const [userName, setUserName] = useState('');
 
     useEffect(() => {
@@ -25,7 +25,7 @@ export default function SelectRoleScreen() {
         }
     };
 
-    const selectRole = async (role: 'customer' | 'merchant') => {
+    const selectRole = async (role: 'customer' | 'store_owner') => {
         setLoading(role);
         console.log('Selecting role:', role);
 
@@ -37,7 +37,7 @@ export default function SelectRoleScreen() {
             router.replace({ pathname: '/(customer)/setup', params: { pendingRole: 'customer' } });
         } else {
             // Go to store creation form with role param
-            router.replace({ pathname: '/(merchant)/create-store', params: { pendingRole: 'merchant' } });
+            router.replace({ pathname: '/(merchant)/create-store', params: { pendingRole: 'store_owner' } });
         }
 
         setLoading(null);
@@ -80,12 +80,12 @@ export default function SelectRoleScreen() {
                     {/* Merchant Card */}
                     <TouchableOpacity
                         style={styles.card}
-                        onPress={() => selectRole('merchant')}
+                        onPress={() => selectRole('store_owner')}
                         disabled={loading !== null}
                         activeOpacity={0.85}
                     >
                         <View style={[styles.cardIcon, { backgroundColor: 'rgba(245, 158, 11, 0.1)' }]}>
-                            {loading === 'merchant' ? (
+                            {loading === 'store_owner' ? (
                                 <ActivityIndicator color={Colors.secondary} />
                             ) : (
                                 <Ionicons name="storefront" size={28} color={Colors.secondary} />

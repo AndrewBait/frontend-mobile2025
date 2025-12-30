@@ -122,7 +122,10 @@ export default function MerchantProductsScreen() {
         const availableCount = item.disponivel ?? stockCount;
         const isLowStock = availableCount <= 3;
         const isExpiringSoon = daysToExpire <= 2;
-        const isActive = item.is_active ?? item.active ?? true;
+        const isManualInactive = item.is_active === false || item.active === false;
+        const isSoldOut = item.status === 'sold_out' || availableCount <= 0;
+        const isExpired = item.status === 'expired' || daysToExpire < 0;
+        const isEffectivelyActive = !isManualInactive && !isSoldOut && !isExpired;
 
         const productData = item.products || item.product;
         const productName = productData?.nome || productData?.name || 'Produto sem nome';
@@ -183,7 +186,7 @@ export default function MerchantProductsScreen() {
 
         return (
             <TouchableOpacity
-                style={[styles.productCard, !isActive && styles.productCardInactive]}
+                style={[styles.productCard, !isEffectivelyActive && styles.productCardInactive]}
                 onPress={handleEdit}
                 activeOpacity={0.7}
             >
@@ -205,9 +208,19 @@ export default function MerchantProductsScreen() {
                         </View>
                     )}
 
-                    {!isActive && (
-                        <View style={styles.inactiveBadge}>
-                            <Text style={styles.inactiveBadgeText}>INATIVO</Text>
+                    {isManualInactive && (
+                        <View style={[styles.inactiveBadge, { backgroundColor: Colors.textMuted }]}>
+                            <Text style={styles.inactiveBadgeText}>DESATIVADO</Text>
+                        </View>
+                    )}
+                    {isSoldOut && (
+                        <View style={[styles.inactiveBadge, { backgroundColor: Colors.warning }]}>
+                            <Text style={styles.inactiveBadgeText}>ESGOTADO</Text>
+                        </View>
+                    )}
+                    {isExpired && (
+                        <View style={[styles.inactiveBadge, { backgroundColor: Colors.error }]}>
+                            <Text style={styles.inactiveBadgeText}>VENCIDO</Text>
                         </View>
                     )}
                 </View>

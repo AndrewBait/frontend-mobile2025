@@ -7,6 +7,7 @@ import { Colors } from '@/constants/Colors';
 import { API_BASE_URL } from '@/constants/config';
 import { api } from '@/services/api';
 import { supabase } from '@/services/supabase';
+import { normalizeRole } from '@/utils/roles';
 import {
     getGlobalRedirectInProgress,
     isAuthSessionLockActive,
@@ -337,7 +338,8 @@ export default function AuthCallbackScreen() {
             // Check if role is empty/null/undefined - user needs to select role
             // IMPORTANTE: Só redireciona para /select-role se REALMENTE não tiver role
             // Se o usuário já tem role cadastrado, não deve ir para seleção de role
-            const roleIsEmpty = !role || role === null || role === undefined || role === '' || role === 'undefined';
+            const normalizedRole = normalizeRole(role);
+            const roleIsEmpty = !normalizedRole;
             if (roleIsEmpty) {
                 console.log('[AuthCallback] ⚠️ NENHUM ROLE ENCONTRADO - Redirecionando para seleção de role');
                 console.log('[AuthCallback] Dados do usuário para debug:', { 
@@ -351,7 +353,7 @@ export default function AuthCallbackScreen() {
                 setGlobalRedirectInProgress(false);
                 router.replace('/select-role');
                 return; // Important: return early to prevent further execution
-            } else if (role === 'customer') {
+            } else if (normalizedRole === 'customer') {
                 // IMPORTANTE: Se o backend atribuiu role "customer" automaticamente (usuário novo sem dados),
                 // detectamos isso e redirecionamos para seleção de role para que o usuário possa escolher
                 // Verificamos se NÃO tem telefone E NÃO tem profile_complete E parece ser um usuário recém-criado
@@ -381,7 +383,7 @@ export default function AuthCallbackScreen() {
                     router.replace('/(customer)/setup');
                     return;
                 }
-            } else if (role === 'store_owner' || role === 'merchant') {
+            } else if (normalizedRole === 'store_owner') {
                 // Para lojista, se tem role já vai direto (assumindo que lojista já tem cadastro se tem role)
                 console.log('[AuthCallback] ✅ Lojista - Redirecionando para dashboard');
                 // Reset flags before redirecting to ensure navigation works

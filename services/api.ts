@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '@/constants/config';
+import { AppRole, normalizeRole } from '@/utils/roles';
 import { getAccessToken, refreshAccessToken } from '@/services/supabase';
 
 // Types based on API contract
@@ -8,7 +9,7 @@ export interface User {
     name?: string;
     phone?: string;
     photo_url?: string;
-    role?: 'customer' | 'merchant' | 'store_owner';
+    role?: AppRole;
     lat?: number;
     lng?: number;
     radius_km?: number;
@@ -90,6 +91,7 @@ export interface Product {
     original_price?: number;
     photo1?: string;
     photo2?: string;
+    type?: 'standard' | 'surprise';
     // Campos Backend (PT-BR / variantes)
     nome?: string;
     descricao?: string;
@@ -114,6 +116,7 @@ export interface Batch {
     desconto_percentual?: number;
     data_vencimento?: string;
     estoque_total?: number;
+    valor_estimado_original?: number;
     disponivel?: number;
     active?: boolean;
     status?: string;
@@ -123,6 +126,7 @@ export interface Batch {
     original_price?: number;
     expiration_date?: string;
     stock?: number;
+    estimated_original_value?: number;
     is_active?: boolean;
     discount_percent?: number;
 
@@ -200,6 +204,7 @@ export interface Payment {
     platform_fee?: number;
     store_value?: number;
 }
+
 
 export interface Order {
     id: string;
@@ -287,6 +292,7 @@ class ApiClient {
 
         const headers: HeadersInit = {
             'Content-Type': 'application/json',
+            'x-api-version': '1', // <--- Explicita a versão
             ...(token && { Authorization: `Bearer ${token}` }),
             ...options.headers,
         };
@@ -505,7 +511,7 @@ class ApiClient {
             name: response.nome || response.name,
             phone: response.telefone || response.phone,
             photo_url: response.foto_url || response.photo_url,
-            role: response.role,
+            role: normalizeRole(response.role),
             lat: response.lat,
             lng: response.lng,
             radius_km: response.raio_padrao_km || response.radius_km || 5,
@@ -527,7 +533,7 @@ class ApiClient {
             name: user.nome || user.name,
             phone: user.telefone || user.phone,
             photo_url: user.foto_url || user.photo_url,
-            role: user.role,
+            role: normalizeRole(user.role),
             lat: customer?.location_lat || user.lat,
             lng: customer?.location_lng || user.lng,
             radius_km: customer?.raio_padrao_km || user.radius_km || 5,
@@ -552,7 +558,10 @@ class ApiClient {
         // Map frontend fields (English) to backend fields (Portuguese)
         const backendData: any = {};
         
-        if (data.role !== undefined) backendData.role = data.role;
+        if (data.role !== undefined) {
+            backendData.role =
+                data.role === 'store_owner' ? 'store_owner' : data.role;
+        }
         if (data.phone !== undefined) {
             // Backend armazena telefone limpo (somente dígitos)
             backendData.telefone = String(data.phone).replace(/\D/g, '');
@@ -697,6 +706,9 @@ class ApiClient {
             discount_percent: data.discount_percent,
             is_active: data.is_active,
         };
+        if (data.estimated_original_value !== undefined) {
+            backendData.estimated_original_value = data.estimated_original_value;
+        }
         
         const batch = await this.request<any>(`/stores/${storeId}/batches`, {
             method: 'POST',
@@ -718,6 +730,12 @@ class ApiClient {
             backendData.estoque_total = data.stock ?? data.estoque_total;
         }
         if (data.estoque_total !== undefined) backendData.estoque_total = data.estoque_total;
+        if (data.estimated_original_value !== undefined) {
+            backendData.valor_estimado_original = data.estimated_original_value;
+        }
+        if (data.valor_estimado_original !== undefined) {
+            backendData.valor_estimado_original = data.valor_estimado_original;
+        }
         if (data.status !== undefined) backendData.status = data.status;
         if (data.active !== undefined) backendData.active = data.active;
         if (data.is_active !== undefined) backendData.active = data.is_active;
@@ -769,6 +787,7 @@ class ApiClient {
             category: products.categoria ?? products.category,
             description: products.descricao ?? products.description,
             preco_normal: products.preco_normal,
+            type: products.type ?? products.tipo,
         } : batch.product;
         
         // Mapear loja com todos os campos possíveis
@@ -792,6 +811,8 @@ class ApiClient {
             expiration_date: batch.data_vencimento ?? batch.expiration_date,
             discount_percent: batch.desconto_percentual ?? batch.discount_percent,
             stock: batch.estoque_total ?? batch.stock,
+            estimated_original_value:
+                batch.valor_estimado_original ?? batch.estimated_original_value,
             disponivel: batch.disponivel ?? batch.stock ?? batch.estoque_total ?? 0,
             estoque_total: batch.estoque_total ?? batch.stock ?? 0,
             is_active: batch.active ?? batch.is_active ?? batch.status === 'active',
@@ -874,11 +895,15 @@ class ApiClient {
                         promo_price: productBatches.preco_promocional ?? productBatches.promo_price,
                         expiration_date: productBatches.data_vencimento ?? productBatches.expiration_date,
                         store_id: productBatches.store_id,
+                        estimated_original_value:
+                            productBatches.valor_estimado_original ??
+                            productBatches.estimated_original_value,
                         product: products
                             ? {
                                 ...products,
                                 name: products.nome ?? products.name,
                                 photo1: products.foto1 ?? products.photo1 ?? products.foto ?? products.image,
+                                type: products.type ?? products.tipo,
                             }
                             : productBatches.product,
                     }
@@ -983,10 +1008,14 @@ class ApiClient {
                     stock: productBatches.disponivel ?? productBatches.stock ?? productBatches.estoque_total ?? 0,
                     disponivel: productBatches.disponivel ?? productBatches.stock ?? productBatches.estoque_total ?? 0,
                     estoque_total: productBatches.estoque_total ?? productBatches.stock ?? 0,
+                    estimated_original_value:
+                        productBatches.valor_estimado_original ??
+                        productBatches.estimated_original_value,
                     product: products ? {
                         ...products,
                         name: products.nome || products.name,
                         photo1: products.foto1 || products.photo1 || products.foto || products.image,
+                        type: products.type ?? products.tipo,
                     } : productBatches.product,
                     store: stores ? {
                         ...stores,

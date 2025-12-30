@@ -285,6 +285,8 @@ export default function ProductDetailScreen() {
     // Handle both PT-BR and EN field names
     const productData = batch.products || batch.product;
     const categoryLabel = productData?.categoria || productData?.category;
+    const isSurprise = productData?.type === 'surprise';
+    const estimatedValue = batch.estimated_original_value ?? batch.valor_estimado_original;
     const heroImage =
         getOptimizedSupabaseImageUrl(productData?.foto1 || productData?.photo1, {
             width: 800,
@@ -366,6 +368,15 @@ export default function ProductDetailScreen() {
                         {/* Product Name */}
                         <Text style={styles.productName}>{productData?.nome || productData?.name}</Text>
 
+                        {isSurprise && (
+                            <Badge
+                                label="Pacote Surpresa"
+                                variant="secondary"
+                                size="sm"
+                                style={styles.surpriseBadge}
+                            />
+                        )}
+
                         {/* Category */}
                         {categoryLabel && (
                             <Badge
@@ -377,6 +388,12 @@ export default function ProductDetailScreen() {
                         )}
 
                         {/* Description */}
+                        {isSurprise && (
+                            <Text style={styles.surpriseHint}>
+                                Itens surpresa. A foto pode ser ilustrativa.
+                            </Text>
+                        )}
+
                         {(productData?.descricao || productData?.description) && (
                             <Text style={styles.description}>{productData?.descricao || productData?.description}</Text>
                         )}
@@ -402,6 +419,11 @@ export default function ProductDetailScreen() {
                                 />
                             )}
                         </View>
+                        {isSurprise && estimatedValue ? (
+                            <Text style={styles.estimatedValue}>
+                                Valor estimado R$ {estimatedValue.toFixed(2).replace('.', ',')}
+                            </Text>
+                        ) : null}
 
                         {/* Expiration & Stock */}
                         <View style={styles.infoCards}>
@@ -569,9 +591,18 @@ const styles = StyleSheet.create({
         color: Colors.text,
         marginBottom: DesignTokens.spacing.md,
     },
+    surpriseBadge: {
+        marginBottom: DesignTokens.spacing.sm,
+        alignSelf: 'flex-start',
+    },
     categoryBadge: {
         marginBottom: DesignTokens.spacing.md,
         alignSelf: 'flex-start',
+    },
+    surpriseHint: {
+        fontSize: 13,
+        color: Colors.textSecondary,
+        marginBottom: 12,
     },
     description: {
         fontSize: 14,
@@ -599,6 +630,12 @@ const styles = StyleSheet.create({
         fontWeight: '800',
         color: Colors.success,
         letterSpacing: -0.5,
+    },
+    estimatedValue: {
+        marginTop: 8,
+        fontSize: 13,
+        color: Colors.textSecondary,
+        fontWeight: '600',
     },
     infoCards: {
         flexDirection: 'row',
