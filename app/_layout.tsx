@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { AuthProvider } from '@/contexts/AuthContext';
+import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { CartProvider } from '@/contexts/CartContext';
 import { SessionExpiredModalHost } from '@/components/feedback/SessionExpiredModalHost';
 import { ToastHost } from '@/components/feedback/ToastHost';
@@ -43,6 +43,40 @@ const queryClient = new QueryClient({
   },
 });
 
+// Componente interno que tem acesso ao AuthContext para forçar remontagem
+function NavigationStack() {
+  const { session } = useAuth();
+
+  console.log('🔍 [DEBUG] NavigationStack renderizando. Session:', !!session);
+
+  return (
+    <Stack
+      // SOLUÇÃO "NUCLEAR": Força o app a reiniciar a navegação do zero quando loga/desloga
+      // Isso destrói completamente o Stack anterior e elimina "Layouts Zumbis"
+      key={session ? 'user-logged-in' : 'user-logged-out'}
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: '#0F0F23' },
+        animation: 'slide_from_right',
+      }}
+    >
+      <Stack.Screen
+        name="index"
+        options={{
+          presentation: 'card',
+        }}
+      />
+      <Stack.Screen name="onboarding" />
+      <Stack.Screen name="select-role" />
+      <Stack.Screen name="(customer)" />
+      <Stack.Screen name="(merchant)" />
+      <Stack.Screen name="product/[id]" />
+      <Stack.Screen name="checkout/[storeId]" />
+      <Stack.Screen name="order/[id]" />
+    </Stack>
+  );
+}
+
 export default function RootLayout() {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (status) => {
@@ -59,27 +93,7 @@ export default function RootLayout() {
           <StatusBar style="light" />
           <SessionExpiredModalHost />
           <ToastHost />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: '#0F0F23' },
-              animation: 'slide_from_right',
-            }}
-          >
-            <Stack.Screen
-              name="index"
-              options={{
-                presentation: 'card',
-              }}
-            />
-            <Stack.Screen name="onboarding" />
-            <Stack.Screen name="select-role" />
-            <Stack.Screen name="(customer)" />
-            <Stack.Screen name="(merchant)" />
-            <Stack.Screen name="product/[id]" />
-            <Stack.Screen name="checkout/[storeId]" />
-            <Stack.Screen name="order/[id]" />
-          </Stack>
+          <NavigationStack />
         </CartProvider>
       </AuthProvider>
     </QueryClientProvider>

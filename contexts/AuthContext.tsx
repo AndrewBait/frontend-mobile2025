@@ -194,51 +194,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             isLoggingOutRef.current = true;
             setIsLoggingOut(true);
 
-            // Clear state FIRST (before Supabase signOut to avoid race conditions)
+            // 1. Limpa estado local IMEDIATAMENTE para disparar a re-renderização do RootLayout
             console.log('[AuthContext] Limpando estado local...');
             setUser(null);
             setSession(null);
 
-            // Sign out from Supabase (this will clear storage automatically)
+            // 2. Limpa sessão no servidor/storage (sem await para não bloquear)
             console.log('[AuthContext] Fazendo signOut do Supabase...');
-            await supabaseSignOut();
-            console.log('[AuthContext] SignOut do Supabase concluído');
+            supabaseSignOut().catch(err => console.error('Erro no supabase signOut:', err));
 
-            // Wait a bit longer to ensure state is fully cleared (especially on iOS)
-            await new Promise(resolve => setTimeout(resolve, 300));
+            // REMOVIDO: router.replace('/');
+            // O RootLayout detectará session=null e desmontará o Stack atual,
+            // voltando automaticamente para o index (Login).
 
-            // Navigate to login screen - use replace to clear navigation stack
-            // On iOS, we need to ensure the navigation happens after state is cleared
-            console.log('[AuthContext] Navegando para /...');
-            
-            // Use setTimeout to ensure navigation happens after React state updates
-            setTimeout(() => {
-                try {
-                    router.replace('/');
-                    console.log('[AuthContext] ✅ Navegação para login concluída');
-                } catch (navError) {
-                    console.error('[AuthContext] Erro ao navegar para login:', navError);
-                    // Fallback: try push if replace fails
-                    try {
-                        router.push('/');
-                    } catch (pushError) {
-                        console.error('[AuthContext] Erro ao fazer push para login:', pushError);
-                    }
-                }
-            }, 100);
-            
-            console.log('[AuthContext] ✅ Logout concluído - LoginScreen deve estar visível agora');
+            console.log('[AuthContext] ✅ Logout iniciado - RootLayout deve resetar a stack agora');
         } catch (error: any) {
             console.error('[AuthContext] Erro durante logout:', error);
-            // Still clear state even if signOut fails
+            // Garante limpeza mesmo com erro
             setUser(null);
             setSession(null);
-            // Still redirect to login even on error
-            try {
-                router.replace('/');
-            } catch (navError) {
-                console.error('[AuthContext] Erro ao redirecionar:', navError);
-            }
         } finally {
             // Reset flag after a delay
             setTimeout(() => {

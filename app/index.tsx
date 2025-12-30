@@ -3,7 +3,7 @@ import { Colors } from '@/constants/Colors';
 import { API_BASE_URL } from '@/constants/config';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/services/api';
-import { getSession, supabase } from '@/services/supabase';
+import { supabase } from '@/services/supabase';
 import {
     getGlobalRedirectInProgress,
     releaseAuthSessionLock,
@@ -13,9 +13,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Linking from 'expo-linking';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 const { height } = Dimensions.get('window');
@@ -30,77 +30,84 @@ const safeUrlForLog = (rawUrl: string) => {
 
 export default function LoginScreen() {
     const [loading, setLoading] = useState(false);
-    const [checking, setChecking] = useState(true);
+    const { session, user } = useAuth();
+
+    // LOG 1: Estado inicial
+    console.log('🔍 [DEBUG] LoginScreen INICIALIZADO. Session:', !!session, 'User:', !!user);
+
+    // Inicializa checking baseado na sessão. Se null, já começa false.
+    const [checking, setChecking] = useState(!!session);
+
     const isProcessingLoginRef = React.useRef(false);
-    const checkExistingSessionRef = React.useRef<() => Promise<void>>(async () => {});
-    const { session } = useAuth();
 
-    // Monitor auth context changes - this ensures LoginScreen responds to logout
+    // LOG 2: Monitoramento de Renderização
+    console.log('🔍 [DEBUG] LoginScreen RENDER. State:', { checking, loading, hasSession: !!session, hasUser: !!user });
+
+    // HOOK DE FOCO: Garante que ao voltar do Logout, a tela desbloqueie imediatamente
+    useFocusEffect(
+        useCallback(() => {
+            console.log('🔍 [DEBUG] useFocusEffect disparado. Session:', !!session);
+            if (!session) {
+                console.log('🔍 [DEBUG] useFocusEffect: !session detectado. Forçando desbloqueio da UI');
+                // Força o desbloqueio da UI
+                setChecking(false);
+                setLoading(false);
+                isProcessingLoginRef.current = false;
+            }
+        }, [session])
+    );
+
+    // EFEITO 1: Redireciona se logado
     useEffect(() => {
-        console.log('🔵 [LoginScreen] Auth context session changed:', !!session);
-        
-        // If we're on login screen and there's no session, ensure we show the login UI
-        if (!session) {
-            console.log('🔵 [LoginScreen] ✅ No session in context - ensuring login screen is shown');
-            if (checking) {
-                console.log('🔵 [LoginScreen] Stopping check, showing login UI');
-                setChecking(false);
-            }
-        } else if (session && !isProcessingLoginRef.current && !loading) {
-            // Only redirect if we're not currently processing a login and not loading
-            // This prevents race conditions with AuthCallback
-            console.log('🔵 [LoginScreen] Session detected in context, but waiting for login process to complete...');
-            // Don't auto-redirect here - let the login process handle it
+        console.log('🔍 [DEBUG] Effect [session, user] disparado. Session:', !!session, 'User:', !!user);
+        if (session && user) {
+            console.log('🔵 [LoginScreen] Destravando: Sessão detectada -> Redirecionando...');
+            const timer = setTimeout(() => {
+                if (user.role === 'store_owner' || user.role === 'merchant') {
+                    router.replace('/(merchant)');
+                } else if (user.role === 'customer') {
+                    user.phone ? router.replace('/(customer)') : router.replace('/(customer)/setup');
+                } else {
+                    router.replace('/select-role');
+                }
+            }, 100);
+            return () => clearTimeout(timer);
         }
-    }, [session, checking, loading]);
+    }, [session, user]);
 
+    // EFEITO 2: Controla o estado de Loading/Checking da tela
     useEffect(() => {
-        console.log('🔵 [LoginScreen] Component mounted - checking session...');
-        void checkExistingSessionRef.current();
-    }, [checkExistingSessionRef]);
+        console.log('🔍 [DEBUG] Effect [session] disparado. Session:', !!session);
 
-    // Log every render
-    console.log('🔵 [LoginScreen] RENDER - checking:', checking, 'loading:', loading, 'hasSession:', !!session);
+        let isMounted = true;
+        const init = async () => {
+            console.log('🔍 [DEBUG] init() iniciado. Session é:', !!session);
 
-    const checkExistingSession = async () => {
-        try {
-            // Primeiro, verificar se o usuário já viu o onboarding
-            console.log('🔵 [LoginScreen] Verificando onboarding...');
-            const hasSeenOnboarding = await AsyncStorage.getItem('@venceja:hasSeenOnboarding');
-            if (!hasSeenOnboarding) {
-                console.log('🔵 [LoginScreen] Usuário não viu onboarding - redirecionando...');
-                router.replace('/onboarding');
-                return;
-            }
-
-            console.log('🔵 [LoginScreen] Verificando sessão existente...');
-            const currentSession = await getSession();
-            console.log('🔵 [LoginScreen] Sessão encontrada:', !!currentSession);
-            
-            // Only redirect if we have a session and we're not currently processing a login
-            // This prevents race conditions where both checkExistingSession and the login flow
-            // try to redirect at the same time
-            if (currentSession && !isProcessingLoginRef.current && !loading) {
-                console.log('🔵 [LoginScreen] Sessão válida encontrada, mas aguardando processo de login...');
-                // Don't redirect here - let the login process handle it to avoid race conditions
-                setChecking(false);
-            } else if (isProcessingLoginRef.current || loading) {
-                console.log('🔵 [LoginScreen] Login em processamento, ignorando verificação de sessão');
-            } else {
-                console.log('🔵 [LoginScreen] ✅ Nenhuma sessão - LoginScreen deve ser exibido');
+            // Se fez logout (session é null), destrava a tela
+            if (!session && isMounted) {
+                console.log('🔍 [DEBUG] !session detectado. Setando checking = false');
                 setChecking(false);
             }
-        } catch (error) {
-            console.error('🔵 [LoginScreen] Erro ao verificar sessão:', error);
-            setChecking(false);
-        } finally {
-            // Only set checking to false if we didn't redirect
-            if (!checking) {
-                console.log('🔵 [LoginScreen] Verificação de sessão concluída, checking = false');
+
+            // Verifica onboarding
+            try {
+                const hasSeenOnboarding = await AsyncStorage.getItem('@venceja:hasSeenOnboarding');
+                if (!hasSeenOnboarding) {
+                    console.log('🔍 [DEBUG] Onboarding não visto. Redirecionando para /onboarding');
+                    router.replace('/onboarding');
+                } else {
+                    console.log('🔍 [DEBUG] Onboarding já foi visto');
+                }
+            } catch (error) {
+                console.error('🔍 [DEBUG] Erro ao verificar onboarding:', error);
             }
-        }
-    };
-    checkExistingSessionRef.current = checkExistingSession;
+        };
+        init();
+        return () => {
+            console.log('🔍 [DEBUG] Effect [session] cleanup - desmontando');
+            isMounted = false;
+        };
+    }, [session]);
 
     const redirectToApp = async () => {
         // Prevent multiple simultaneous calls (check both local and global flags)
@@ -468,12 +475,15 @@ export default function LoginScreen() {
             if (acquiredAuthLock) {
                 releaseAuthSessionLock(authLockOwner);
             }
-            setLoading(false);
+            // Só tira o loading se NÃO logou. Se logou, deixa girando até trocar de tela.
+            if (!session) { 
+                setLoading(false); 
+            }
         }
     };
 
     if (checking) {
-        console.log('🔵 [LoginScreen] Still checking session, showing loading...');
+        console.log('🔍 [DEBUG] Renderizando VIEW DE CARREGAMENTO (Checking = true)');
         return (
             <GradientBackground>
                 <View style={styles.loadingContainer}>
@@ -484,7 +494,7 @@ export default function LoginScreen() {
         );
     }
 
-    console.log('🔵 [LoginScreen] ✅ Rendering login screen UI (checking=false, loading=' + loading + ')');
+    console.log('🔍 [DEBUG] Renderizando TELA PRINCIPAL DE LOGIN (Checking = false)');
     return (
         <GradientBackground>
             <View style={styles.container}>

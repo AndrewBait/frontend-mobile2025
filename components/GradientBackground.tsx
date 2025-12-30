@@ -8,10 +8,12 @@ interface GradientBackgroundProps {
     variant?: 'default' | 'hero' | 'clean';
 }
 
-export const GradientBackground: React.FC<GradientBackgroundProps> = ({ 
+export const GradientBackground: React.FC<GradientBackgroundProps> = ({
     children,
     variant = 'default'
 }) => {
+    console.log('🔍 [DEBUG] GradientBackground renderizando. Variant:', variant, 'hasChildren:', !!children);
+
     if (variant === 'clean') {
         return (
             <View style={styles.cleanContainer}>
@@ -40,7 +42,7 @@ export const GradientBackground: React.FC<GradientBackgroundProps> = ({
         <View style={styles.container}>
             {/* Fundo limpo e moderno */}
             <View style={styles.backgroundBase} />
-            
+
             {/* Gradiente sutil no topo */}
             <LinearGradient
                 colors={['rgba(16, 185, 129, 0.03)', 'transparent']}

@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { api, Batch, Store } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient'; // <--- IMPORTANTE: Adicionei isso
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -37,13 +38,10 @@ export default function MerchantProductsScreen() {
             }
             void loadStoresRef.current();
 
-            // FIX: ao voltar de criar/editar produto, a loja selecionada pode ser a mesma
-            // e o useEffect([selectedStore]) não dispara. Forçamos reload ao focar.
             if (selectedStore) {
                 const timer = setTimeout(() => {
                     void loadBatchesRef.current();
                 }, 350);
-
                 return () => clearTimeout(timer);
             }
         }, [session, isLoggingOut, selectedStore, loadBatchesRef, loadStoresRef])
@@ -116,7 +114,6 @@ export default function MerchantProductsScreen() {
     );
 
     const renderBatch = ({ item }: { item: Batch }) => {
-        // Handle both PT-BR and EN field names
         const expirationDate = item.expiration_date || item.data_vencimento || '';
         const daysToExpire = Math.ceil(
             (new Date(expirationDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
@@ -127,13 +124,11 @@ export default function MerchantProductsScreen() {
         const isExpiringSoon = daysToExpire <= 2;
         const isActive = item.is_active ?? item.active ?? true;
 
-        // Get product info - Supabase returns 'products' (plural) from the join
         const productData = item.products || item.product;
         const productName = productData?.nome || productData?.name || 'Produto sem nome';
         const productPhoto = productData?.foto1 || productData?.photo1 || null;
         const productCategory = productData?.categoria || productData?.category || '';
 
-        // Prices
         const originalPrice = item.original_price ?? item.preco_normal_override ?? productData?.preco_normal ?? 0;
         const promoPrice = item.promo_price ?? item.preco_promocional ?? 0;
         const discountPercent = item.discount_percent ?? item.desconto_percentual ?? 0;
@@ -151,7 +146,7 @@ export default function MerchantProductsScreen() {
                             try {
                                 await api.deleteProduct(item.product_id);
                                 Alert.alert('Sucesso', 'Produto excluído com sucesso!');
-                                loadBatches(); // Refresh the list
+                                loadBatches();
                             } catch (error: any) {
                                 console.error('Error deleting product:', error);
                                 Alert.alert('Erro', error.message || 'Não foi possível excluir o produto.');
@@ -173,7 +168,6 @@ export default function MerchantProductsScreen() {
                 {
                     text: 'Editar',
                     onPress: () => {
-                        // Navigate to create-product with edit mode
                         router.push({
                             pathname: '/(merchant)/create-product',
                             params: {
@@ -184,7 +178,7 @@ export default function MerchantProductsScreen() {
                         });
                     }
                 }
-            ])
+            ]);
         };
 
         return (
@@ -193,7 +187,6 @@ export default function MerchantProductsScreen() {
                 onPress={handleEdit}
                 activeOpacity={0.7}
             >
-                {/* Product Image */}
                 <View style={styles.imageContainer}>
                     {productPhoto ? (
                         <Image
@@ -206,14 +199,12 @@ export default function MerchantProductsScreen() {
                         </View>
                     )}
 
-                    {/* Discount Badge */}
                     {discountPercent > 0 && (
                         <View style={styles.discountBadgeAbsolute}>
                             <Text style={styles.discountBadgeText}>-{discountPercent}%</Text>
                         </View>
                     )}
 
-                    {/* Inactive Badge */}
                     {!isActive && (
                         <View style={styles.inactiveBadge}>
                             <Text style={styles.inactiveBadgeText}>INATIVO</Text>
@@ -221,9 +212,7 @@ export default function MerchantProductsScreen() {
                     )}
                 </View>
 
-                {/* Product Info */}
                 <View style={styles.productInfo}>
-                    {/* Category & Name */}
                     {productCategory && (
                         <Text style={styles.productCategory}>{productCategory}</Text>
                     )}
@@ -231,7 +220,6 @@ export default function MerchantProductsScreen() {
                         {productName}
                     </Text>
 
-                    {/* Prices */}
                     <View style={styles.priceRow}>
                         <Text style={styles.originalPrice}>
                             R$ {originalPrice.toFixed(2).replace('.', ',')}
@@ -241,9 +229,7 @@ export default function MerchantProductsScreen() {
                         </Text>
                     </View>
 
-                    {/* Tags Row */}
                     <View style={styles.tagsRow}>
-                        {/* Expiration */}
                         <View style={[
                             styles.tag,
                             { backgroundColor: isExpiringSoon ? Colors.error20 : Colors.warning20 }
@@ -261,7 +247,6 @@ export default function MerchantProductsScreen() {
                             </Text>
                         </View>
 
-                        {/* Stock */}
                         <View style={[
                             styles.tag,
                             { backgroundColor: isLowStock ? Colors.error20 : Colors.success20 }
@@ -281,7 +266,6 @@ export default function MerchantProductsScreen() {
                     </View>
                 </View>
 
-                {/* Edit Icon */}
                 <View style={styles.editButton}>
                     <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
                 </View>
@@ -324,7 +308,6 @@ export default function MerchantProductsScreen() {
     return (
         <GradientBackground>
             <View style={styles.container}>
-                {/* Header */}
                 <View style={styles.header}>
                     <View>
                         <Text style={styles.title}>Produtos</Text>
@@ -332,7 +315,6 @@ export default function MerchantProductsScreen() {
                     </View>
                 </View>
 
-                {/* Store Filter */}
                 {stores.length > 1 && (
                     <AdaptiveList
                         data={stores}
@@ -345,18 +327,10 @@ export default function MerchantProductsScreen() {
                     />
                 )}
 
-                {/* Products List */}
                 {batches.length === 0 ? (
                     <View style={styles.emptyListContainer}>
                         <Ionicons name="cube-outline" size={48} color={Colors.textMuted} />
                         <Text style={styles.emptyListText}>Nenhum produto cadastrado</Text>
-                        <TouchableOpacity
-                            style={styles.addProductButton}
-                            onPress={() => router.push('/(merchant)/create-product')}
-                        >
-                            <Ionicons name="add" size={18} color={Colors.text} />
-                            <Text style={styles.addProductButtonText}>Adicionar Produto</Text>
-                        </TouchableOpacity>
                     </View>
                 ) : (
                     <AdaptiveList
@@ -376,15 +350,26 @@ export default function MerchantProductsScreen() {
                     />
                 )}
 
-                {/* FAB - Floating Action Button */}
+                {/* FAB - Floating Action Button CORRIGIDO */}
                 <TouchableOpacity
                     style={styles.fab}
-                    onPress={() => router.push('/(merchant)/create-product')}
+                    onPress={() => {
+                        // Passar o storeId selecionado para pré-selecionar a loja na criação
+                        router.push({
+                            pathname: '/(merchant)/create-product',
+                            params: { storeId: selectedStore }
+                        });
+                    }}
                     activeOpacity={0.8}
                 >
-                    <View style={styles.fabGradient}>
+                    <LinearGradient
+                        colors={[Colors.primary, Colors.primaryDark]}
+                        style={styles.fabGradient}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                    >
                         <Ionicons name="add" size={32} color="#FFFFFF" />
-                    </View>
+                    </LinearGradient>
                 </TouchableOpacity>
             </View>
         </GradientBackground>
@@ -443,7 +428,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: DesignTokens.padding.medium, // Responsivo
+        paddingHorizontal: DesignTokens.padding.medium,
         marginBottom: DesignTokens.spacing.lg,
     },
     title: {
@@ -455,6 +440,7 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: Colors.textSecondary,
     },
+    // FAB Styles Corrigidos
     fab: {
         position: 'absolute',
         bottom: 24,
@@ -464,6 +450,7 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.4,
         shadowRadius: 8,
         elevation: 8,
+        zIndex: 999, // Garantir que fique acima de tudo
     },
     fabGradient: {
         width: 60,
@@ -500,9 +487,9 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     listContent: {
-        paddingHorizontal: DesignTokens.padding.medium, // Responsivo
-        paddingBottom: 120, // Espaço para FAB
-        gap: DesignTokens.grid.gap.medium, // Gap entre cards
+        paddingHorizontal: DesignTokens.padding.medium,
+        paddingBottom: 120, // Espaço extra para o FAB não cobrir o último item
+        gap: DesignTokens.grid.gap.medium,
     },
     productCard: {
         flexDirection: 'row',
@@ -545,14 +532,17 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: Colors.success,
     },
-    discountBadge: {
-        backgroundColor: Colors.error,
+    discountBadgeAbsolute: {
+        position: 'absolute',
+        top: 4,
+        left: 4,
+        backgroundColor: Colors.primary,
         paddingHorizontal: 6,
         paddingVertical: 2,
-        borderRadius: 4,
+        borderRadius: 6,
     },
-    discountText: {
-        fontSize: 10,
+    discountBadgeText: {
+        fontSize: 11,
         fontWeight: '700',
         color: Colors.text,
     },
@@ -623,20 +613,6 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.glass,
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    discountBadgeAbsolute: {
-        position: 'absolute',
-        top: 4,
-        left: 4,
-        backgroundColor: Colors.primary,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 6,
-    },
-    discountBadgeText: {
-        fontSize: 11,
-        fontWeight: '700',
-        color: Colors.text,
     },
     inactiveBadge: {
         position: 'absolute',

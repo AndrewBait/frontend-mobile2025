@@ -119,10 +119,18 @@ export default function CreateProductScreen() {
 
     useEffect(() => {
         void loadStoresRef.current();
-        if (isEditMode) {
+        
+        if (isEditMode && editProductId) {
+            // 1. Bloqueia a UI imediatamente (evita piscar o form antigo)
+            setLoadingEditData(true);
+            
+            // 2. Limpa os dados da memória (evita "fantasma" do produto anterior)
+            resetForm(); 
+            
+            // 3. Busca os novos dados
             void loadExistingDataRef.current();
         }
-    }, [isEditMode, loadExistingDataRef, loadStoresRef]);
+    }, [isEditMode, editProductId, loadExistingDataRef, loadStoresRef]);
 
     const loadExistingData = async () => {
         if (!editProductId || !editBatchId) return;
@@ -816,8 +824,16 @@ export default function CreateProductScreen() {
                                 <ActivityIndicator color={Colors.text} />
                             ) : (
                                 <>
-                                    <Ionicons name="add-circle" size={20} color={Colors.text} />
-                                    <Text style={styles.submitText}>Cadastrar Produto</Text>
+                                    {/* Ícone muda: Check (Salvar) ou Add (Criar) */}
+                                    <Ionicons 
+                                        name={isEditMode ? "checkmark-circle" : "add-circle"} 
+                                        size={20} 
+                                        color={Colors.text} 
+                                    />
+                                    {/* Texto muda dinamicamente */}
+                                    <Text style={styles.submitText}>
+                                        {isEditMode ? "Salvar Alterações" : "Cadastrar Produto"}
+                                    </Text>
                                 </>
                             )}
                         </LinearGradient>
