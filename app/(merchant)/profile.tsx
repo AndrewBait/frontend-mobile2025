@@ -109,7 +109,10 @@ export default function MerchantProfileScreen() {
                         <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
                     </TouchableOpacity>
 
-                    <TouchableOpacity style={styles.menuItem}>
+                    <TouchableOpacity
+                        style={styles.menuItem}
+                        onPress={() => router.push('/(merchant)/premium' as any)}
+                    >
                         <View style={[styles.menuIcon, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
                             <Ionicons name="diamond-outline" size={20} color={Colors.warning} />
                         </View>

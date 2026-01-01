@@ -12,8 +12,6 @@ export const GradientBackground: React.FC<GradientBackgroundProps> = ({
     children,
     variant = 'default'
 }) => {
-    console.log('🔍 [DEBUG] GradientBackground renderizando. Variant:', variant, 'hasChildren:', !!children);
-
     if (variant === 'clean') {
         return (
             <View style={styles.cleanContainer}>

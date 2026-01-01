@@ -22,7 +22,7 @@ const getNotificationsModule = async (): Promise<ExpoNotificationsModule | null>
         if (isExpoGo()) {
             if (__DEV__ && !didWarnExpoGo) {
                 didWarnExpoGo = true;
-                console.warn(
+                console.log(
                     '[Notifications] Expo Go não suporta push remoto (SDK 53+). Use um development build (dev-client).',
                 );
             }
@@ -152,7 +152,6 @@ export async function registerNotificationTokenWithBackend(): Promise<boolean> {
         const token = await registerForPushNotificationsAsync();
 
         if (!token) {
-            if (__DEV__) console.log('Não foi possível obter token de notificação');
             return false;
         }
 

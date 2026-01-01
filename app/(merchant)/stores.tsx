@@ -1,5 +1,5 @@
 import { AdaptiveList } from '@/components/base/AdaptiveList';
-import React, { useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import {
     StyleSheet,
     View,
@@ -23,7 +23,12 @@ export default function MerchantStoresScreen() {
     const [stores, setStores] = useState<Store[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [checkingPlan, setCheckingPlan] = useState(false);
     const loadStoresRef = React.useRef<() => Promise<void>>(async () => {});
+
+    const activeStoresCount = useMemo(() => {
+        return (stores || []).filter((s) => (s.active ?? s.is_active ?? true)).length;
+    }, [stores]);
 
     useFocusEffect(
         useCallback(() => {
@@ -62,18 +67,68 @@ export default function MerchantStoresScreen() {
         loadStores();
     };
 
-    const handleAddStore = () => {
-        if (stores.length > 0) {
+    const handleAddStore = async () => {
+        if (checkingPlan || isLoggingOut || !session) return;
+
+        // Primeira loja (free): sempre permitido.
+        if (activeStoresCount === 0) {
+            router.push('/(merchant)/create-store');
+            return;
+        }
+
+        setCheckingPlan(true);
+        try {
+            const status = await api.getPremiumSubscriptionStatus();
+
+            const hasPremiumAccess = Boolean(status?.has_premium_access);
+            const hasSubscription = Boolean(status?.subscription_id);
+            const limit = hasPremiumAccess ? 3 : 1;
+
+            if (activeStoresCount >= limit) {
+                if (hasPremiumAccess) {
+                    Alert.alert(
+                        'Limite do plano',
+                        `Seu plano Premium permite até ${limit} loja(s) ativa(s). Para criar outra, arquive uma loja existente.`,
+                        [
+                            { text: 'OK' },
+                            { text: 'Gerenciar Premium', onPress: () => router.push('/(merchant)/premium' as any) },
+                        ]
+                    );
+                    return;
+                }
+
+                const message = hasSubscription
+                    ? 'Sua assinatura já foi criada, mas ainda não está ativa. Finalize o pagamento (PIX) ou aguarde a confirmação para liberar lojas adicionais.'
+                    : 'Você já possui 1 loja gratuita. Para adicionar mais lojas, assine o plano Premium e libere até 3 lojas ativas.';
+
+                Alert.alert(
+                    'Plano Premium',
+                    message,
+                    [
+                        { text: 'Cancelar', style: 'cancel' },
+                        { text: 'Ver Plano', onPress: () => router.push('/(merchant)/premium' as any) },
+                    ]
+                );
+                return;
+            }
+
+            router.push('/(merchant)/create-store');
+        } catch (error: any) {
+            // Se falhar ao buscar plano, mantém comportamento seguro (não libera sem validação)
+            if (!error.message?.includes('Not authenticated') && !isLoggingOut) {
+                console.error('Error checking premium status:', error);
+            }
+
             Alert.alert(
-                '🏪 Loja Adicional',
-                'Você já possui uma loja gratuita. Para adicionar mais lojas, é necessário assinar o plano Premium.\n\n💎 Plano Premium: R$ 49,90/mês por loja adicional',
+                'Plano Premium',
+                'Não foi possível verificar seu plano agora. Tente novamente em instantes.',
                 [
-                    { text: 'Cancelar', style: 'cancel' },
-                    { text: 'Ver Planos', onPress: () => { } },
+                    { text: 'OK' },
+                    { text: 'Ver Plano', onPress: () => router.push('/(merchant)/premium' as any) },
                 ]
             );
-        } else {
-            router.push('/(merchant)/create-store');
+        } finally {
+            setCheckingPlan(false);
         }
     };
 
@@ -173,19 +228,23 @@ export default function MerchantStoresScreen() {
                         <Text style={styles.title}>Minhas Lojas</Text>
                         <Text style={styles.subtitle}>{stores.length} cadastrada(s)</Text>
                     </View>
-                    <TouchableOpacity onPress={handleAddStore}>
+                    <TouchableOpacity onPress={() => void handleAddStore()}>
                         <LinearGradient
                             colors={[Colors.secondary, Colors.secondaryDark]}
                             style={styles.addButton}
                         >
-                            <Ionicons name="add" size={24} color={Colors.text} />
+                            {checkingPlan ? (
+                                <ActivityIndicator size="small" color={Colors.text} />
+                            ) : (
+                                <Ionicons name="add" size={24} color={Colors.text} />
+                            )}
                         </LinearGradient>
                     </TouchableOpacity>
                 </View>
 
                 {/* Free Store Banner */}
                 {stores.length === 0 && (
-                    <TouchableOpacity style={styles.freeBanner} onPress={handleAddStore}>
+                    <TouchableOpacity style={styles.freeBanner} onPress={() => void handleAddStore()}>
                         <View style={styles.freeBannerIcon}>
                             <Ionicons name="gift" size={24} color={Colors.success} />
                         </View>
@@ -232,7 +291,7 @@ export default function MerchantStoresScreen() {
                     <View style={styles.premiumInfo}>
                         <Ionicons name="information-circle" size={16} color={Colors.textSecondary} />
                         <Text style={styles.premiumInfoText}>
-                            Lojas adicionais: R$ 49,90/mês cada
+                            Plano Premium: até 3 lojas ativas + taxa menor
                         </Text>
                     </View>
                 )}

@@ -48,8 +48,6 @@ const queryClient = new QueryClient({
 function NavigationStack() {
   const { session } = useAuth();
 
-  console.log('🔍 [DEBUG] NavigationStack renderizando. Session:', !!session);
-
   return (
     <Stack
       // SOLUÇÃO "NUCLEAR": Força o app a reiniciar a navegação do zero quando loga/desloga

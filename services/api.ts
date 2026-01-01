@@ -247,6 +247,10 @@ class ApiClient {
     private lastNetworkErrorTime: Map<string, number> = new Map();
 
     private extractApiErrorMessage(payload: any, statusCode: number): string {
+        if (statusCode === 429) {
+            return 'Muitas requisições. Aguarde alguns segundos e tente novamente.';
+        }
+
         const candidates = [
             payload?.message,
             payload?.error,
@@ -375,7 +379,7 @@ class ApiClient {
                     errorMessage.includes('Role not found') ||
                     isCartEndpoint
                 );
-                const isExpectedError = statusCode === 409 || statusCode === 400 || isForbiddenRole;
+                const isExpectedError = statusCode === 409 || statusCode === 400 || statusCode === 429 || isForbiddenRole;
                 
                 if (isExpectedError) {
                     // Log silencioso para erros esperados (não logar como ERROR)
@@ -473,8 +477,9 @@ class ApiClient {
                     isCartEndpoint
                 );
                 const isExpectedHttpError = fetchError?.status === 409 || fetchError?.statusCode === 409 ||
-                                          fetchError?.status === 400 || fetchError?.statusCode === 400 ||
-                                          isForbiddenRole;
+                                           fetchError?.status === 400 || fetchError?.statusCode === 400 ||
+                                           fetchError?.status === 429 || fetchError?.statusCode === 429 ||
+                                           isForbiddenRole;
                 
                 if (!isExpectedHttpError) {
                     // Non-network errors should always be logged (exceto erros esperados)
@@ -1331,6 +1336,45 @@ class ApiClient {
         return this.request('/me/payments/mock-confirm', {
             method: 'POST',
             body: JSON.stringify({ order_id: orderId }),
+        });
+    }
+
+    // ==================== SUBSCRIPTIONS (PREMIUM) ====================
+
+    async getPremiumSubscriptionStatus(): Promise<{
+        plan_tier?: 'free' | 'premium';
+        plan_status?: string;
+        current_period_end?: string | null;
+        has_premium_access?: boolean;
+        subscription_id?: string | null;
+    }> {
+        return this.request('/me/subscriptions/premium');
+    }
+
+    async getPremiumSubscriptionPix(): Promise<{
+        ok: boolean;
+        subscription_id: string;
+        pix: { payment_id: string; qr_code_image?: string; copy_paste_code?: string } | null;
+    }> {
+        return this.request('/me/subscriptions/premium/pix');
+    }
+
+    async subscribePremium(payload: any): Promise<{
+        ok: boolean;
+        subscription_id: string;
+        asaas_customer_id?: string;
+        note?: string;
+        pix?: { payment_id: string; qr_code_image?: string; copy_paste_code?: string };
+    }> {
+        return this.request('/me/subscriptions/premium', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        });
+    }
+
+    async cancelPremiumSubscription(): Promise<{ ok: boolean }> {
+        return this.request('/me/subscriptions/premium/cancel', {
+            method: 'POST',
         });
     }
 

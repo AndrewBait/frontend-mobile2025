@@ -172,7 +172,12 @@ export const useToast = () => {
         };
     }, []);
 
-    const showToast = (
+    const hideToast = useCallback(() => {
+        toastState = { ...toastState, visible: false };
+        toastListeners.forEach((listener) => listener(toastState));
+    }, []);
+
+    const showToast = useCallback((
         message: string,
         type: ToastType = 'info',
         duration?: number,
@@ -191,12 +196,7 @@ export const useToast = () => {
                 hideToast();
             }, duration);
         }
-    };
-
-    const hideToast = () => {
-        toastState = { ...toastState, visible: false };
-        toastListeners.forEach((listener) => listener(toastState));
-    };
+    }, [hideToast]);
 
     return {
         toast: state,

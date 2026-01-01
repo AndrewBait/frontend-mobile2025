@@ -114,6 +114,12 @@ export default function MerchantLayout() {
                     href: null,
                 }}
             />
+            <Tabs.Screen
+                name="premium"
+                options={{
+                    href: null,
+                }}
+            />
         </Tabs>
     );
 }

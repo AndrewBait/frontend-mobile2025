@@ -81,13 +81,14 @@ export default function MerchantDashboard() {
             };
 
             const timeoutPromise = new Promise<Store[]>((resolve) =>
-                (timeoutId = setTimeout(() => {
-                    console.log('Dashboard fetch timeout');
-                    resolve([]);
-                }, 8000))
+                (timeoutId = setTimeout(() => resolve([]), 8000))
             );
 
             const storesData = await Promise.race([fetchStores(), timeoutPromise]);
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                timeoutId = undefined;
+            }
             console.log('Stores loaded:', storesData.length);
 
             // Load dashboard summary for first store
