@@ -34,6 +34,11 @@ interface GroupedCart {
     total: number;
 }
 
+// Valor mínimo por pedido (por loja) para liberar checkout.
+// Mantido no frontend para UX: evita ida ao checkout/PIX sem atingir o mínimo.
+const MIN_ORDER_VALUE = 5.0;
+const MIN_ORDER_VALUE_CENTS = Math.round(MIN_ORDER_VALUE * 100);
+
 const getBatchFromItem = (item: CartItem): Batch | null => {
     return item.batch || item.product_batches || null;
 };
@@ -456,7 +461,14 @@ export default function CartScreen() {
         );
     };
 
-    const renderStoreGroup = ({ item }: { item: GroupedCart }) => (
+    const renderStoreGroup = ({ item }: { item: GroupedCart }) => {
+        // Lógica de validação do mínimo (em centavos para evitar problemas de float)
+        const total = Number.isFinite(item.total) ? item.total : 0;
+        const totalCents = Math.round(total * 100);
+        const isBelowMinimum = totalCents < MIN_ORDER_VALUE_CENTS;
+        const missingAmount = Math.max(0, (MIN_ORDER_VALUE_CENTS - totalCents) / 100);
+
+        return (
         <View style={styles.storeGroup}>
             {/* Store Header - Com logo se disponível */}
             <View style={styles.storeHeader}>
@@ -501,31 +513,85 @@ export default function CartScreen() {
 
             {/* Subtotal and Checkout - Melhorado */}
             <View style={styles.storeFooter}>
-                <View style={styles.subtotalContainer}>
-                    <View style={styles.subtotalRow}>
-                        <Text style={styles.subtotalLabel}>Subtotal ({item.items.length} {item.items.length === 1 ? 'item' : 'itens'})</Text>
-                        <Text style={styles.subtotalValue}>R$ {item.total.toFixed(2).replace('.', ',')}</Text>
+                    <View style={styles.subtotalContainer}>
+                        <View style={styles.subtotalRow}>
+                            <Text style={styles.subtotalLabel}>
+                                Subtotal ({item.items.length} {item.items.length === 1 ? 'item' : 'itens'})
+                            </Text>
+                            <Text style={styles.subtotalValue}>
+                                R$ {total.toFixed(2).replace('.', ',')}
+                            </Text>
+                        </View>
+
+                        {/* AVISO VISUAL SE NÃO ATINGIU O MÍNIMO */}
+                        {isBelowMinimum && (
+                            <View style={{ 
+                                backgroundColor: '#FFFBEB', // Amarelo claro
+                                padding: 12, 
+                                borderRadius: 8,
+                                marginTop: 8,
+                                marginBottom: 8,
+                                borderWidth: 1,
+                                borderColor: '#FCD34D',
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: 8
+                            }}>
+                                <Ionicons name="alert-circle" size={20} color="#D97706" />
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ color: '#B45309', fontSize: 12, fontWeight: '600' }}>
+                                        Pedido mínimo: R$ {MIN_ORDER_VALUE.toFixed(2).replace('.', ',')}
+                                    </Text>
+                                    <Text style={{ color: '#B45309', fontSize: 12 }}>
+                                        Adicione mais <Text style={{ fontWeight: 'bold' }}>R$ {missingAmount.toFixed(2).replace('.', ',')}</Text> para fechar o pedido.
+                                    </Text>
+                                </View>
+                            </View>
+                        )}
+
+                        <View style={styles.totalRow}>
+                            <Text style={styles.totalLabel}>Total</Text>
+                            <Text style={[styles.totalValue, isBelowMinimum && { color: Colors.textMuted }]}>
+                                R$ {total.toFixed(2).replace('.', ',')}
+                            </Text>
+                        </View>
                     </View>
-                    <View style={styles.totalRow}>
-                        <Text style={styles.totalLabel}>Total</Text>
-                        <Text style={styles.totalValue}>R$ {item.total.toFixed(2).replace('.', ',')}</Text>
-                    </View>
-                </View>
 
                 <Button
-                    title="Pagar com PIX"
-                    onPress={() => handleCheckout(item.storeId)}
-                    variant="primary"
+                    title={isBelowMinimum ? 'Atingir valor mínimo' : 'Pagar com PIX'}
+                    onPress={() => {
+                        if (isBelowMinimum) {
+                            Alert.alert(
+                                'Pedido Mínimo',
+                                `O valor mínimo para pagamentos via PIX é de R$ ${MIN_ORDER_VALUE.toFixed(2).replace('.', ',')}. Adicione mais itens ao carrinho.`,
+                            );
+                            return;
+                        }
+                        void handleCheckout(item.storeId);
+                    }}
+                    variant={isBelowMinimum ? 'outline' : 'primary'}
                     size="lg"
-                    leftIcon={<Ionicons name="qr-code" size={20} color={Colors.text} />}
+                    // Deixamos habilitado para clicar e ver o alerta (bloqueia apenas a ação real do checkout)
+                    disabled={false}
+                    style={isBelowMinimum ? { opacity: 0.6 } : {}}
+                    leftIcon={!isBelowMinimum ? <Ionicons name="qr-code" size={20} color={Colors.text} /> : undefined}
                     fullWidth
                     hapticFeedback
-                    accessibilityLabel={`Pagar R$ ${item.total.toFixed(2)} com PIX`}
-                    accessibilityHint="Gerar código PIX para pagamento"
+                    accessibilityLabel={
+                        isBelowMinimum
+                            ? `Atingir pedido mínimo (faltam R$ ${missingAmount.toFixed(2).replace('.', ',')})`
+                            : `Pagar R$ ${total.toFixed(2).replace('.', ',')} com PIX`
+                    }
+                    accessibilityHint={
+                        isBelowMinimum
+                            ? 'Adicione mais itens para liberar o pagamento'
+                            : 'Gerar código PIX para pagamento'
+                    }
                 />
             </View>
         </View>
-    );
+        );
+    };
 
     const showInitialLoading = cartQuery.isFetching && !cartQuery.data;
 

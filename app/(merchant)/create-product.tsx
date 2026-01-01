@@ -19,7 +19,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -47,6 +47,8 @@ interface FormErrors {
     photo1?: string;
     photo2?: string;
 }
+
+const MIN_ORDER_VALUE = 5.0;
 
 export default function CreateProductScreen() {
     // Check for edit mode params
@@ -92,6 +94,12 @@ export default function CreateProductScreen() {
     const [photo2IsNew, setPhoto2IsNew] = useState(false);
     const loadStoresRef = React.useRef<() => Promise<void>>(async () => {});
     const loadExistingDataRef = React.useRef<() => Promise<void>>(async () => {});
+
+    // Aviso educativo: preço baixo pode impedir checkout (mínimo PIX no app)
+    const isLowPrice = useMemo(() => {
+        const price = parseFloat(promoPrice.replace(',', '.'));
+        return Number.isFinite(price) && price > 0 && price < MIN_ORDER_VALUE;
+    }, [promoPrice]);
 
     // Reset form when screen focuses (for new product mode)
     const resetForm = () => {
@@ -894,6 +902,27 @@ export default function CreateProductScreen() {
                             {errors.promoPrice && <Text style={styles.errorText}>{errors.promoPrice}</Text>}
                         </View>
                     </View>
+
+                    {/* Aviso para lojista: valor mínimo do PIX no app */}
+                    {isLowPrice && (
+                        <View style={{
+                            flexDirection: 'row',
+                            backgroundColor: '#EFF6FF', // Azul bem claro
+                            padding: 12,
+                            borderRadius: 12,
+                            marginTop: 8,
+                            marginBottom: 16,
+                            gap: 8,
+                            borderWidth: 1,
+                            borderColor: '#BFDBFE'
+                        }}>
+                            <Ionicons name="information-circle" size={20} color="#3B82F6" />
+                            <Text style={{ flex: 1, fontSize: 12, color: '#1E40AF', lineHeight: 18 }}>
+                                <Text style={{ fontWeight: 'bold' }}>Nota:</Text> O valor mínimo para pagamento via PIX no app é R$ {MIN_ORDER_VALUE.toFixed(2).replace('.', ',')}.{' '}
+                                O cliente precisará comprar mais de uma unidade deste produto ou adicionar outros itens ao carrinho para finalizar a compra.
+                            </Text>
+                        </View>
+                    )}
 
                     {calculateDiscount() > 0 && (
                         <View style={styles.discountBadge}>
