@@ -68,7 +68,11 @@ export default function LoginScreen() {
                 if (normalizedRole === 'store_owner') {
                     router.replace('/(merchant)');
                 } else if (normalizedRole === 'customer') {
-                    user.phone ? router.replace('/(customer)') : router.replace('/(customer)/setup');
+                    if (user.phone) {
+                        router.replace('/(customer)');
+                    } else {
+                        router.replace('/(customer)/setup');
+                    }
                 } else {
                     router.replace('/select-role');
                 }

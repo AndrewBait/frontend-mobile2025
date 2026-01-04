@@ -90,7 +90,6 @@ export default function CreateStoreScreen() {
     const [closeTime, setCloseTime] = useState('');
     const [logoUri, setLogoUri] = useState<string | null>(null);
     const [asaasWalletId, setAsaasWalletId] = useState('');
-    const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
     useEffect(() => {
         if (isEditMode && editStoreId) {
@@ -361,8 +360,6 @@ export default function CreateStoreScreen() {
                 await api.updateStore(editStoreId, updateData);
                 console.log('Store updated successfully');
 
-                setHasUnsavedChanges(false); // Reset after successful update
-
                 Alert.alert(
                     '✅ Loja Atualizada!',
                     'As informações da loja foram atualizadas com sucesso.',
@@ -480,22 +477,6 @@ export default function CreateStoreScreen() {
         );
     }
 
-    // Security: Confirmação antes de descartar alterações
-    const handleBack = () => {
-        if (!hasUnsavedChanges) {
-            router.back();
-            return;
-        }
-        Alert.alert(
-            'Descartar alterações?',
-            'Você tem alterações não salvas que serão perdidas.',
-            [
-                { text: 'Cancelar', style: 'cancel' },
-                { text: 'Descartar', style: 'destructive', onPress: () => router.back() }
-            ]
-        );
-    };
-
     return (
         <GradientBackground>
             <KeyboardAvoidingView
@@ -506,7 +487,7 @@ export default function CreateStoreScreen() {
                 <View style={styles.header}>
                     <TouchableOpacity
                         style={styles.backButton}
-                        onPress={handleBack}
+                        onPress={() => router.back()}
                     >
                         <Ionicons name="arrow-back" size={24} color={Colors.text} />
                     </TouchableOpacity>
@@ -552,7 +533,7 @@ export default function CreateStoreScreen() {
                         <TextInput
                             style={[styles.input, errors.name && styles.inputError]}
                             value={name}
-                            onChangeText={(v) => { setName(v.slice(0, 50)); setHasUnsavedChanges(true); }}
+                            onChangeText={(v) => setName(v.slice(0, 50))}
                             placeholder="Ex: Supermercado Bom Preço"
                             placeholderTextColor={Colors.textMuted}
                             maxLength={50}
@@ -568,7 +549,7 @@ export default function CreateStoreScreen() {
                         <TextInput
                             style={[styles.input, errors.cnpj && styles.inputError]}
                             value={cnpj}
-                            onChangeText={(v) => { setCnpj(formatCNPJ(v)); setHasUnsavedChanges(true); }}
+                            onChangeText={(v) => setCnpj(formatCNPJ(v))}
                             placeholder="00.000.000/0000-00"
                             placeholderTextColor={Colors.textMuted}
                             keyboardType="numeric"

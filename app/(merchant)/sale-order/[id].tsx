@@ -123,10 +123,34 @@ export default function MerchantSaleOrderScreen() {
         return { deadline, label, expired: ms <= 0 };
     }, [order?.pickup_deadline]);
 
+    /**
+     * SEGURANÇA: Sanitiza o número de telefone antes de abrir URL
+     * Remove caracteres potencialmente perigosos e valida formato
+     */
+    const sanitizePhoneNumber = (phone: string): string | null => {
+        // Remove tudo que não seja dígito ou +
+        const cleaned = phone.replace(/[^\d+]/g, '');
+
+        // Valida que parece um número de telefone válido
+        // Aceita: +55..., 55..., ou números locais (10-11 dígitos)
+        if (!/^\+?\d{10,15}$/.test(cleaned)) {
+            return null;
+        }
+
+        return cleaned;
+    };
+
     const handleCallCustomer = async () => {
         const phone = order?.customer?.phone;
         if (!phone) return;
-        const telUrl = `tel:${phone}`;
+
+        const sanitizedPhone = sanitizePhoneNumber(phone);
+        if (!sanitizedPhone) {
+            Alert.alert('Erro', 'Número de telefone inválido.');
+            return;
+        }
+
+        const telUrl = `tel:${sanitizedPhone}`;
         const canOpen = await Linking.canOpenURL(telUrl);
         if (!canOpen) {
             Alert.alert('Não disponível', 'Não foi possível abrir o discador neste dispositivo.');

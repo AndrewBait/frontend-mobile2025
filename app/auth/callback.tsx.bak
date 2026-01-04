@@ -24,13 +24,6 @@ const safeUrlForLog = (rawUrl: string | null | undefined) => {
     return withoutHash.split('?')[0];
 };
 
-// Security: OAuth Redirect URI Whitelist
-const VALID_REDIRECT_HOSTS = [
-    'rkmvrfqhcleibdtlcwwh.supabase.co',
-    'api-venceja.cloud',
-    'localhost',
-];
-
 export default function AuthCallbackScreen() {
     const params = useLocalSearchParams();
     const url = useURL();
@@ -141,23 +134,6 @@ export default function AuthCallbackScreen() {
             }
 
             if (callbackUrl) {
-                // Security: Validate redirect URI
-                try {
-                    const parsedUrl = new URL(callbackUrl);
-                    if (!VALID_REDIRECT_HOSTS.includes(parsedUrl.hostname)) {
-                        console.error("[Security] Invalid redirect host:", parsedUrl.hostname);
-                        throw new Error("Invalid redirect URI");
-                    }
-                    console.log("[Security] Redirect host validated:", parsedUrl.hostname);
-                } catch (error: any) {
-                    if (error?.message === "Invalid redirect URI") {
-                        console.error("[Security] Blocked redirect to unauthorized host");
-                        router.replace("/");
-                        return;
-                    }
-                    console.warn("[Security] Could not parse URL for validation:", error);
-                }
-
                 // Extract hash part (after #)
                 const hashIndex = callbackUrl.indexOf('#');
                 console.log('[AuthCallback] Hash encontrado na posição:', hashIndex);

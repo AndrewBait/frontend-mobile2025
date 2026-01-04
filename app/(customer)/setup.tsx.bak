@@ -24,7 +24,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -310,7 +309,6 @@ export default function CustomerSetupScreen() {
             await refreshUser();
 
             showToast('Cadastro completo! Bem-vindo ao VenceJá.', 'success');
-            setHasUnsavedChanges(false); // Reset after successful save
             router.replace('/(customer)');
         } catch (error: any) {
             console.error('Error saving profile:', error);
@@ -341,22 +339,6 @@ export default function CustomerSetupScreen() {
     const hasRequiredFields = useMemo(() => {
         return validateRequired(phone) && validateRequired(cpf);
     }, [phone, cpf]);
-    // Security: Confirmação antes de descartar alterações
-    const handleBack = () => {
-        if (!hasUnsavedChanges) {
-            router.back();
-            return;
-        }
-        Alert.alert(
-            'Descartar alterações?',
-            'Você tem alterações não salvas que serão perdidas.',
-            [
-                { text: 'Cancelar', style: 'cancel' },
-                { text: 'Descartar', style: 'destructive', onPress: () => router.back() }
-            ]
-        );
-    };
-
 
     return (
         <GradientBackground>
@@ -368,7 +350,7 @@ export default function CustomerSetupScreen() {
                 <View style={styles.header}>
                     <TouchableOpacity
                         style={styles.backButton}
-                        onPress={handleBack}
+                        onPress={() => router.back()}
                     >
                         <Ionicons name="arrow-back" size={24} color={Colors.text} />
                     </TouchableOpacity>
@@ -453,7 +435,7 @@ export default function CustomerSetupScreen() {
                         <TextInput
                             style={[styles.input, errors.phone && styles.inputError]}
                             value={phone}
-                            onChangeText={useCallback((v: string) => { setPhone(formatPhone(v)); setHasUnsavedChanges(true); }, [])}
+                            onChangeText={useCallback((v: string) => setPhone(formatPhone(v)), [])}
                             placeholder="(00) 00000-0000"
                             placeholderTextColor={Colors.textMuted}
                             keyboardType="phone-pad"
@@ -469,7 +451,7 @@ export default function CustomerSetupScreen() {
                         <TextInput
                             style={[styles.input, errors.cpf && styles.inputError]}
                             value={cpf}
-                            onChangeText={useCallback((v: string) => { setCpf(formatCPF(v)); setHasUnsavedChanges(true); }, [])}
+                            onChangeText={useCallback((v: string) => setCpf(formatCPF(v)), [])}
                             placeholder="000.000.000-00"
                             placeholderTextColor={Colors.textMuted}
                             keyboardType="numeric"

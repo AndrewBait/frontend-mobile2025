@@ -92,7 +92,6 @@ export default function CreateProductScreen() {
     // Track if photos are new (local) or existing (URLs)
     const [photo1IsNew, setPhoto1IsNew] = useState(false);
     const [photo2IsNew, setPhoto2IsNew] = useState(false);
-    const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
     const loadStoresRef = React.useRef<() => Promise<void>>(async () => {});
     const loadExistingDataRef = React.useRef<() => Promise<void>>(async () => {});
 
@@ -552,7 +551,6 @@ export default function CreateProductScreen() {
                 }
 
                 showToast('Produto atualizado com sucesso!', 'success');
-                setHasUnsavedChanges(false);
                 router.back();
             } else {
                 // CREATE MODE - Original logic
@@ -622,7 +620,6 @@ export default function CreateProductScreen() {
                 console.log('Batch created successfully');
 
                 showToast('Produto cadastrado com sucesso!', 'success');
-                setHasUnsavedChanges(false);
                 router.back();
             }
         } catch (error: any) {
@@ -677,12 +674,6 @@ export default function CreateProductScreen() {
         );
     }
 
-    const handleBack = () => {
-        if (!hasUnsavedChanges) { router.back(); return; }
-        Alert.alert('Descartar alterações?', 'Você tem alterações não salvas que serão perdidas.',
-            [{ text: 'Cancelar', style: 'cancel' }, { text: 'Descartar', style: 'destructive', onPress: () => router.back() }]);
-    };
-
     return (
         <GradientBackground>
             <KeyboardAvoidingView
@@ -693,7 +684,7 @@ export default function CreateProductScreen() {
                 <View style={styles.header}>
                     <TouchableOpacity
                         style={styles.backButton}
-                        onPress={handleBack}
+                        onPress={() => router.back()}
                     >
                         <Ionicons name="arrow-back" size={24} color={Colors.text} />
                     </TouchableOpacity>

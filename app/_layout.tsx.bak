@@ -4,7 +4,6 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { CartProvider } from '@/contexts/CartContext';
 import { SessionExpiredModalHost } from '@/components/feedback/SessionExpiredModalHost';
 import { ToastHost } from '@/components/feedback/ToastHost';
-import { OfflineBanner } from '@/components/feedback/OfflineBanner';
 import { AppErrorBoundary } from '@/components/feedback/AppErrorBoundary';
 import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import React, { useEffect } from 'react';
@@ -92,7 +91,6 @@ export default function RootLayout() {
         <CartProvider>
           <AppErrorBoundary>
             <StatusBar style="light" />
-            <OfflineBanner />
             <SessionExpiredModalHost />
             <ToastHost />
             <NavigationStack />
